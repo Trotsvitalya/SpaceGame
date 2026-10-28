@@ -18,6 +18,7 @@ class MemeEventSystem:
         "vacuum_hurricane": 6.0,
         "golden_dragon": 6.5,
         "red_envelopes": 6.0,
+        "coffin_dance": 5.8,
     }
 
     def __init__(self):
@@ -25,20 +26,21 @@ class MemeEventSystem:
         self.time = 0.0
         self.cooldown = 10.0
         self.next_event = 0
-        self.arrow_count = 12
+        self.arrow_count = 22
         self.dragon_hits = set()
         self.envelopes = []
+        self.last_ended = None
 
     @property
     def active(self):
         return self.kind is not None
 
     def start(self, kind):
-        if kind not in self.EVENTS:
+        if kind not in self.EVENTS and kind != "coffin_dance":
             return False
         self.kind = kind
         self.time = 0.0
-        self.arrow_count = 12
+        self.arrow_count = 22
         self.dragon_hits.clear()
         self.envelopes.clear()
         if kind == "red_envelopes":
@@ -67,6 +69,7 @@ class MemeEventSystem:
                 envelope["y"] += envelope["speed"] * dt
                 envelope["x"] += math.sin(self.time * 2.8 + envelope["phase"]) * 34 * dt
         if self.time >= self.DURATIONS[self.kind]:
+            self.last_ended = self.kind
             self.kind = None
             self.envelopes.clear()
             return "end"
@@ -115,6 +118,12 @@ class MemeEventSystem:
         y = VH * .48 + math.sin(progress * math.tau * 2.2) * VH * .13
         return x, y, progress
 
+    def _boat_position(self):
+        progress = clamp(self.time / self.DURATIONS["straw_boat"], 0.0, 1.0)
+        x = -270 + (VW + 540) * progress
+        y = VH * .51 + math.sin(self.time * 2.6) * 11
+        return x, y, progress
+
     def _damage_dragon_targets(self, game):
         x, y, progress = self._dragon_position()
         if progress >= 1.0:
@@ -144,11 +153,12 @@ class MemeEventSystem:
                              if envelope not in collected and envelope["y"] < VH + 40]
 
     def absorbs_bullet(self, bullet):
-        if (self.kind != "straw_boat"
-                or abs(bullet.posX - VW * .5) > 248
-                or abs(bullet.posY - VH * .50) > 92):
+        if self.kind != "straw_boat":
             return False
-        self.arrow_count = min(24, self.arrow_count + 1)
+        cx, cy, _progress = self._boat_position()
+        if abs(bullet.posX - cx) > 248 or abs(bullet.posY - cy) > 92:
+            return False
+        self.arrow_count = min(38, self.arrow_count + 1)
         return True
 
     def draw_arrow(self, surface, bullet):
@@ -176,6 +186,8 @@ class MemeEventSystem:
             self._draw_dragon(surface, resources)
         elif self.kind == "red_envelopes":
             self._draw_envelopes(surface, resources)
+        elif self.kind == "coffin_dance":
+            self._draw_coffin_dance(surface, resources)
 
     @staticmethod
     def _text(surface, resources, text, size, color, center):
@@ -194,7 +206,8 @@ class MemeEventSystem:
 
     def _draw_straw_boat(self, surface, resources):
         layer = pygame.Surface((VW, VH), pygame.SRCALPHA)
-        cx, deck = VW // 2, int(VH * .51)
+        cx, boat_y, progress = self._boat_position()
+        deck = int(boat_y)
         wave_y = deck + 62
         for index in range(5):
             x = (index * 173 + int(self.time * 95)) % (VW + 160) - 80
@@ -241,6 +254,46 @@ class MemeEventSystem:
                    (cx, deck - 190))
         self._text(layer, resources, "咚", 38, (255, 224, 110),
                    (cx, deck - 133))
+        if progress < .05:
+            layer.set_alpha(int(255 * progress / .05))
+        elif progress > .95:
+            layer.set_alpha(int(255 * (1.0 - progress) / .05))
+        surface.blit(layer, (0, 0))
+
+    def _draw_coffin_dance(self, surface, resources):
+        layer = pygame.Surface((VW, VH), pygame.SRCALPHA)
+        progress = clamp(self.time / self.DURATIONS["coffin_dance"], 0.0, 1.0)
+        x = -170 + (VW + 340) * progress
+        bob = math.sin(self.time * 12.0) * 9
+        y = int(VH * .50 + bob)
+        coffin = pygame.Rect(int(x - 96), y - 26, 192, 55)
+        pygame.draw.rect(layer, (115, 25, 39, 255), coffin, border_radius=12)
+        pygame.draw.rect(layer, (255, 198, 88, 255), coffin, 4, border_radius=12)
+        pygame.draw.line(layer, (255, 223, 138, 255),
+                         (coffin.centerx, coffin.top + 8),
+                         (coffin.centerx, coffin.bottom - 8), 3)
+        self._text(layer, resources, "福", 24, (255, 224, 134), coffin.center)
+        for index in range(6):
+            px = x - 132 + index * 53
+            phase = self.time * 9 + index * .8
+            lift = math.sin(phase) * 13
+            py = y + 37 + lift
+            pygame.draw.circle(layer, (237, 184, 135, 255),
+                               (int(px), int(py - 13)), 10)
+            pygame.draw.polygon(layer, (24, 35, 54, 255),
+                                ((px - 12, py - 3), (px + 12, py - 3),
+                                 (px + 17, py + 27), (px - 17, py + 27)))
+            swing = math.sin(phase) * 17
+            pygame.draw.line(layer, (237, 184, 135, 255),
+                             (px - 7, py + 2), (px - 20, py - 18 + swing), 5)
+            pygame.draw.line(layer, (237, 184, 135, 255),
+                             (px + 7, py + 2), (px + 20, py - 18 - swing), 5)
+            pygame.draw.line(layer, (20, 26, 42, 255),
+                             (px - 8, py + 24), (px - 16, py + 45), 6)
+            pygame.draw.line(layer, (20, 26, 42, 255),
+                             (px + 8, py + 24), (px + 16, py + 45), 6)
+        self._text(layer, resources, "抬棺", 31, (255, 224, 134),
+                   (x, y - 70))
         surface.blit(layer, (0, 0))
 
     def _draw_vortex(self, surface, resources):

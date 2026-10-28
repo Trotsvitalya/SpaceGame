@@ -106,6 +106,7 @@ def capture_all():
         ("vacuum_hurricane", "VacuumHurricane.png"),
         ("golden_dragon", "GoldenDragon.png"),
         ("red_envelopes", "RedEnvelopes.png"),
+        ("coffin_dance", "CoffinDance.png"),
     ):
         event_game = game_with_enemies(app, "meme")
         event_game.meme_event.start(kind)

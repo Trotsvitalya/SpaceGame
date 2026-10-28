@@ -7,7 +7,7 @@ import random
 
 import pygame
 
-from AudioSynth import make_meme_loop, make_sfx
+from AudioSynth import make_coffin_dance_loop, make_meme_loop, make_sfx
 from utils import ROOT
 
 MUSIC_MENU = os.path.join(ROOT, "assets", "music", "BackgroundMenu.mp3")
@@ -56,6 +56,8 @@ class AudioManager:
         self.single_loop = False
         self.meme_loop_channel = None
         self.meme_loop_sound = None
+        self.coffin_channel = None
+        self.coffin_sound = None
         self.paused = False
         self.music_paused = False
         self.last_played = {}
@@ -67,6 +69,7 @@ class AudioManager:
                 pygame.mixer.set_num_channels(24)
                 pygame.mixer.set_reserved(1)
                 self.meme_loop_channel = pygame.mixer.Channel(0)
+                self.coffin_channel = pygame.mixer.Channel(1)
                 # pygame-ce 2.5.x has no pygame.MUSIC_END constant, so use a
                 # project event and register it with the music player.
                 pygame.mixer.music.set_endevent(MUSIC_END_EVENT)
@@ -186,6 +189,7 @@ class AudioManager:
 
     def stop_music(self):
         self._stop_all_music()
+        self.stop_coffin_dance()
         self.current_key = None
         self.playlist = []
         self.paused = False
@@ -257,6 +261,30 @@ class AudioManager:
         except pygame.error:
             return False
 
+    def play_coffin_dance(self):
+        """Loop the original synthesized dance beat while its event is active."""
+        if not self.enabled or self.settings.muted or self.coffin_channel is None:
+            return False
+        try:
+            if self.coffin_channel.get_busy():
+                return True
+            if self.coffin_sound is None:
+                self.coffin_sound = make_coffin_dance_loop()
+            if self.coffin_sound is None:
+                return False
+            self.coffin_channel.set_volume(self._music_volume() * 0.72)
+            self.coffin_channel.play(self.coffin_sound, loops=-1)
+            return True
+        except (pygame.error, ValueError, MemoryError):
+            return False
+
+    def stop_coffin_dance(self):
+        try:
+            if self.coffin_channel is not None:
+                self.coffin_channel.stop()
+        except pygame.error:
+            pass
+
     def _start_playlist(self, files, loop=False):
         self.playlist = list(files)
         random.shuffle(self.playlist)
@@ -307,11 +335,22 @@ class AudioManager:
                     self.music_paused = True
             except pygame.error:
                 pass
+        if self.coffin_channel is not None:
+            try:
+                if self.coffin_channel.get_busy():
+                    self.coffin_channel.pause()
+            except pygame.error:
+                pass
 
     def resume_music(self):
         if not self.enabled:
             return
         self.paused = False
+        if self.coffin_channel is not None:
+            try:
+                self.coffin_channel.unpause()
+            except pygame.error:
+                pass
         if not self.music_paused:
             return
         self.music_paused = False
@@ -336,6 +375,11 @@ class AudioManager:
         if self.meme_loop_channel is not None:
             try:
                 self.meme_loop_channel.set_volume(self._music_volume() * 0.75)
+            except pygame.error:
+                pass
+        if self.coffin_channel is not None:
+            try:
+                self.coffin_channel.set_volume(self._music_volume() * 0.72)
             except pygame.error:
                 pass
         if self.settings.muted:

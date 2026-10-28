@@ -261,7 +261,7 @@ class EnemyShip:
         player = game.target_player(self.posX, self.posY)
         event = getattr(game, "meme_event", None)
         if event is not None and event.kind == "straw_boat":
-            tx, ty = VW * .5, VH * .51
+            tx, ty, _progress = event._boat_position()
         else:
             tx = player.centerx if player.alive else VW * 0.5
             ty = player.centery if player.alive else VH

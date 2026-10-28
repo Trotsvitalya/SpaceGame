@@ -243,3 +243,41 @@ def make_meme_loop():
         left[index] = mono * (1.0 - pan)
         right[index] = mono * (1.0 + pan)
     return _sound_from_channels(left, right, 0.55)
+
+
+def make_coffin_dance_loop():
+    """Create an original upbeat 8-bit dance loop for the coffin meme."""
+    fmt = _mixer_format()
+    if fmt is None:
+        return None
+    sample_rate, _channels = fmt
+    bpm = 126.0
+    beat = 60.0 / bpm
+    duration = beat * 8.0
+    count = int(sample_rate * duration)
+    notes = (659, 784, 988, 784, 587, 659, 784, 659,
+             523, 659, 784, 659, 494, 587, 659, 587)
+    bass_notes = (110, 110, 147, 147, 98, 98, 131, 131)
+    rng = random.Random(126)
+    samples = [0.0] * count
+    for index in range(count):
+        t = index / sample_rate
+        beat_index = int(t / beat) % 8
+        local = (t % beat) / beat
+        eighth_index = int((t % (beat * .5)) / (beat * .5))
+        lead_index = beat_index * 2 + eighth_index
+        lead_phase = (t * notes[lead_index]) % 1.0
+        lead = (1.0 if lead_phase < .5 else -.72) * math.exp(-local * 3.2) * .17
+        bass_phase = (t * bass_notes[beat_index]) % 1.0
+        bass = (4.0 * abs(bass_phase - .5) - 1.0) * .23
+        kick_phase = t % (beat * 2)
+        kick = math.sin(math.tau * (58.0 - 28.0 * min(1.0, kick_phase / .16))
+                        * kick_phase) * math.exp(-kick_phase * 25.0) * .56
+        backbeat_phase = (t - beat) % (beat * 2)
+        snare = 0.0
+        if backbeat_phase < .12:
+            snare = rng.uniform(-1.0, 1.0) * (1.0 - backbeat_phase / .12) * .23
+        hat_phase = t % (beat * .5)
+        hat = rng.uniform(-1.0, 1.0) * max(0.0, 1.0 - hat_phase / .035) * .10
+        samples[index] = lead + bass * .35 + kick + snare + hat
+    return _sound_from_mono(samples, .52)

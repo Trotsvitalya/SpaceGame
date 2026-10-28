@@ -705,6 +705,8 @@ class GameProcess:
             self._update_announcements(dt)
             return
         if self.state == "upgrade":
+            if self.mode == "meme":
+                self._update_meme_event(dt)
             self._update_announcements(dt)
             return
         if self.state == "gameover":
@@ -720,14 +722,7 @@ class GameProcess:
         # playing
         self.game_time += dt
         if self.mode == "meme":
-            event = self.meme_event.update(dt)
-            if event == "start":
-                self.audio.play({
-                    "straw_boat": "meme_drum",
-                    "vacuum_hurricane": "meme_wow",
-                    "golden_dragon": "meme_boing",
-                    "red_envelopes": "meme_pickup",
-                }.get(self.meme_event.kind, "meme_boing"), 0.65)
+            self._update_meme_event(dt)
         self.tiger_drop_cooldown = max(0.0, self.tiger_drop_cooldown - dt)
         self._update_player(dt)
         self._update_bullets(dt)
@@ -919,6 +914,30 @@ class GameProcess:
                 and not self.tiger_ultimate.active
                 and random.random() < TigerUltimate.DROP_CHANCE):
             self._spawn_tiger_powerup(enemy.posX, enemy.posY)
+
+    def _update_meme_event(self, dt):
+        event = self.meme_event.update(dt)
+        if event == "start":
+            if self.meme_event.kind == "coffin_dance":
+                self.audio.play_coffin_dance()
+            else:
+                self.audio.play({
+                    "straw_boat": "meme_drum",
+                    "vacuum_hurricane": "meme_wow",
+                    "golden_dragon": "meme_boing",
+                    "red_envelopes": "meme_pickup",
+                }.get(self.meme_event.kind, "meme_boing"), 0.65)
+        elif (event == "end"
+              and self.meme_event.last_ended == "coffin_dance"):
+            self.audio.stop_coffin_dance()
+
+    def _start_coffin_dance(self):
+        if self.mode != "meme":
+            return False
+        started = self.meme_event.start("coffin_dance")
+        if started:
+            self.audio.play_coffin_dance()
+        return started
 
     def _has_tiger_powerup(self):
         return any(p.alive and p.kind == "tiger" for p in self.powerups)
@@ -1243,6 +1262,9 @@ class GameProcess:
         enemy._handled = True
         enemy.alive = False
         self.kills += 1
+        if (self.mode == "meme" and self.kills % 12 == 0
+                and not self.tiger_ultimate.active and not self.chainsaw.active):
+            self._start_coffin_dance()
         if award:
             gained = self._register_kill(int(enemy.score))
             self.effects.text(
@@ -1317,6 +1339,7 @@ class GameProcess:
         self.audio.play("crash", 1.0)
         if self.mode == "meme":
             self.audio.play("meme_explode", 0.9)
+            self._start_coffin_dance()
         self.shake.add(1.0)
         self.enemy_bullets.clear()
         self.danger_zones.clear()
@@ -1392,6 +1415,9 @@ class GameProcess:
             "campaign_complete": campaign_complete,
         }
         self.audio.stop_music()
+        if (self.mode == "meme"
+                and self.meme_event.kind == "coffin_dance"):
+            self.audio.play_coffin_dance()
         self.audio.play("wave", 0.9)
         self.audio.play("upgrade_apply", 0.7)
         self._build_victory_widgets(summary, campaign_complete)

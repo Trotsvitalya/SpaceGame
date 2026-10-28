@@ -616,10 +616,15 @@ class GameFlowTests(GameTestCase):
     def test_chinese_meme_events_draw_and_apply_gameplay_effects(self):
         game = self.make_game("meme")
         game.meme_event.start("straw_boat")
-        game.spawn_enemy_bullet(VW * .5, VH * .51, math.pi / 2, 0)
+        game.meme_event.time = 2.7
+        boat_x, boat_y, _progress = game.meme_event._boat_position()
+        game.spawn_enemy_bullet(boat_x, boat_y, math.pi / 2, 0)
         game._update_bullets(.01)
         self.assertEqual(game.enemy_bullets, [])
-        self.assertEqual(game.meme_event.arrow_count, 13)
+        self.assertEqual(game.meme_event.arrow_count, 23)
+        first_x = boat_x
+        game.meme_event.time += 1.0
+        self.assertGreater(game.meme_event._boat_position()[0], first_x)
         game.draw(self.app.canvas)
 
         enemy = EnemyShip("scout", "meme", self.app.resources,
@@ -632,6 +637,18 @@ class GameFlowTests(GameTestCase):
         after = math.hypot(enemy.posX - center[0], enemy.posY - center[1])
         self.assertLess(after, before)
         game.draw(self.app.canvas)
+
+    def test_coffin_dance_triggers_on_meme_kill_milestone_and_stops(self):
+        game = self.make_game("meme")
+        game.kills = 11
+        enemy = EnemyShip("scout", "meme", self.app.resources,
+                          x=VW * .5, y=VH * .25)
+        game._kill_enemy(enemy, award=False, drop=False)
+        self.assertEqual(game.meme_event.kind, "coffin_dance")
+        game.draw(self.app.canvas)
+        game._update_meme_event(game.meme_event.DURATIONS["coffin_dance"] + .01)
+        self.assertIsNone(game.meme_event.kind)
+        self.assertEqual(game.meme_event.last_ended, "coffin_dance")
 
     def test_tiger_claws_do_not_dim_the_restored_background(self):
         ultimate = TigerUltimate()
