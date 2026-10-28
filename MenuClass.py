@@ -23,6 +23,7 @@ from Localization import LANGUAGE_NAMES, tr
 from NetCode import ClientSession, HostSession, local_ip
 from ResourcesClass import MEME_PALETTE, NORMAL_PALETTE, palette_for
 from SpaceBackdrop import SpaceBackdrop
+from SettingsClass import SCREEN_RESOLUTIONS
 from UIClass import (Button, Choice, Slider, TextInput, Toggle, WidgetGroup,
                      draw_bar, draw_panel, draw_text)
 from utils import VH, VW, clamp, format_score
@@ -221,7 +222,7 @@ class Menu:
         cx = VW // 2
         left = cx - 330
         width = 660
-        top = 104
+        top = 84
 
         def save_and_apply():
             self.settings.save()
@@ -255,62 +256,69 @@ class Menu:
                    lambda: self.settings.music_volume,
                    lambda value: setattr(self.settings, "music_volume", value),
                    save_and_apply),
-            Slider((left, top + 42, width, 40),
+            Slider((left, top + 38, width, 40),
                    lambda: tr(self.language, "sfx"),
                    lambda: self.settings.sfx_volume,
                    lambda value: setattr(self.settings, "sfx_volume", value),
                    save_and_apply),
-            Toggle((left, top + 88, width, 40),
+            Toggle((left, top + 80, width, 40),
                    lambda: tr(self.language, "mute"),
                    lambda: self.settings.muted,
                    lambda value: setattr(self.settings, "muted", value),
                    save_and_apply),
-            Toggle((left, top + 134, width, 40),
+            Toggle((left, top + 122, width, 40),
                    lambda: tr(self.language, "fullscreen"),
                    lambda: self.settings.fullscreen,
                    lambda value: setattr(self.settings, "fullscreen", value),
                    apply_fullscreen),
-            Toggle((left, top + 180, width, 40),
+            Choice((left, top + 164, width, 40),
+                   lambda: tr(self.language, "screen_resolution"),
+                   [(size, size.replace("x", " × "))
+                    for size in SCREEN_RESOLUTIONS],
+                   lambda: SCREEN_RESOLUTIONS.index(self.settings.screen_resolution),
+                   self._set_resolution_index,
+                   apply_fullscreen),
+            Toggle((left, top + 206, width, 40),
                    lambda: tr(self.language, "screen_shake"),
                    lambda: self.settings.screen_shake,
                    lambda value: setattr(self.settings, "screen_shake", value),
                    save_only),
-            Toggle((left, top + 226, width, 40),
+            Toggle((left, top + 248, width, 40),
                    lambda: tr(self.language, "show_fps"),
                    lambda: self.settings.show_fps,
                    lambda value: setattr(self.settings, "show_fps", value),
                    save_only),
-            Choice((left, top + 272, width, 40),
+            Choice((left, top + 290, width, 40),
                    lambda: tr(self.language, "effects_quality"),
                    [(0, quality_labels[0]), (1, quality_labels[1]),
                     (2, quality_labels[2])],
                    lambda: int(getattr(self.settings, "effects_quality", 2)),
                    self._set_quality_index,
                    save_only),
-            Toggle((left, top + 318, width, 40),
+            Toggle((left, top + 332, width, 40),
                    lambda: tr(self.language, "reduced_flash"),
                    lambda: self.settings.reduced_flash,
                    lambda value: setattr(self.settings, "reduced_flash", value),
                    apply_effects),
-            Toggle((left, top + 364, width, 40),
+            Toggle((left, top + 374, width, 40),
                    lambda: tr(self.language, "auto_pause"),
                    lambda: self.settings.auto_pause,
                    lambda value: setattr(self.settings, "auto_pause", value),
                    save_only),
-            Choice((left, top + 410, width, 40),
+            Choice((left, top + 416, width, 40),
                    lambda: tr(self.language, "language"),
                    [("uk", LANGUAGE_NAMES["uk"]), ("en", LANGUAGE_NAMES["en"])],
                    lambda: 0 if self.settings.language == "uk" else 1,
                    self._set_language_index,
                    apply_language),
-            Choice((left, top + 456, width, 40),
+            Choice((left, top + 458, width, 40),
                    lambda: tr(self.language, "difficulty"),
                    [(key, tr(self.language, "difficulty_" + key))
                     for key in DIFFICULTY_ORDER],
                    lambda: self._difficulty_index(),
                    self._set_difficulty_index,
                    save_only),
-            Button((cx - 130, top + 510, 260, 44),
+            Button((cx - 130, top + 504, 260, 44),
                    lambda: tr(self.language, "back"), "back", size=20),
         ]
         self.widgets = WidgetGroup(widgets, on_hover=self._hover_sound)
@@ -729,6 +737,13 @@ class Menu:
         self.settings.effects_quality = max(0, min(2, int(index)))
         self.backdrop.set_quality(self.settings.effects_quality)
         self.effects.set_quality(self.settings.effects_quality)
+
+    def _set_resolution_index(self, index):
+        index = max(0, min(len(SCREEN_RESOLUTIONS) - 1, int(index)))
+        self.settings.screen_resolution = SCREEN_RESOLUTIONS[index]
+        self.app._windowed_size = tuple(
+            int(part) for part in self.settings.screen_resolution.split("x")
+        )
 
     def _select_ship(self, kind):
         if kind not in SHIPS:

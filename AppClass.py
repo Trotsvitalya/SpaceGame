@@ -64,7 +64,12 @@ class App:
             self.settings.fullscreen = False
         self.leaderboard = Leaderboard.load()
         self.campaign_progress = CampaignProgress.load()
-        self._windowed_size = (VW, VH)
+        try:
+            self._windowed_size = tuple(
+                int(part) for part in self.settings.screen_resolution.split("x")
+            )
+        except (AttributeError, TypeError, ValueError):
+            self._windowed_size = (VW, VH)
         self.window = None
         self.viewport = (0, 0, VW, VH)
         self.mouse = (-9999.0, -9999.0)
@@ -90,8 +95,16 @@ class App:
 
     def _apply_display_mode(self):
         try:
+            display_size = tuple(int(part) for part in
+                                 self.settings.screen_resolution.split("x"))
+            if (len(display_size) != 2 or display_size[0] < 640
+                    or display_size[1] < 360):
+                display_size = (VW, VH)
+        except (AttributeError, TypeError, ValueError):
+            display_size = (VW, VH)
+        try:
             if self.settings.fullscreen:
-                self.window = pygame.display.set_mode((0, 0), pygame.FULLSCREEN)
+                self.window = pygame.display.set_mode(display_size, pygame.FULLSCREEN)
             else:
                 self.window = pygame.display.set_mode(self._windowed_size, pygame.RESIZABLE)
         except pygame.error:
@@ -104,15 +117,6 @@ class App:
         self._compute_viewport()
 
     def apply_display_mode(self):
-        if not self.settings.fullscreen:
-            try:
-                current = pygame.display.get_surface()
-                if current and not (pygame.display.get_surface().get_flags() & pygame.FULLSCREEN):
-                    size = current.get_size()
-                    if size[0] >= 640 and size[1] >= 360:
-                        self._windowed_size = size
-            except pygame.error:
-                pass
         self._apply_display_mode()
 
     def toggle_fullscreen(self):

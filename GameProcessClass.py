@@ -919,13 +919,15 @@ class GameProcess:
     def _update_meme_event(self, dt):
         event = self.meme_event.update(dt)
         if event == "start":
-            self.audio.play_meme_shout()
             if self.meme_event.kind == "coffin_dance":
                 self.audio.play_coffin_dance()
+            elif self.meme_event.kind == "straw_boat":
+                self.audio.play_meme_shout()
+                self.audio.play("meme_drum", 0.65)
+                self.audio.play("meme_water", 0.55)
             else:
                 self.audio.play({
-                    "straw_boat": "meme_drum",
-                    "vacuum_hurricane": "meme_wow",
+                    "vacuum_hurricane": "meme_air_raid",
                     "golden_dragon": "meme_boing",
                     "red_envelopes": "meme_pickup",
                 }.get(self.meme_event.kind, "meme_boing"), 0.65)
@@ -961,8 +963,6 @@ class GameProcess:
     def _tiger_strike(self):
         # The cinematic keeps combat paused, but attacks resolve progressively
         # as each visible claw or saw crosses the arena.
-        if self.mode == "meme":
-            self.audio.play_meme_shout()
         self.enemy_bullets.clear()
         self.player_bullets.clear()
         self.pending_asteroids.clear()
@@ -1022,7 +1022,6 @@ class GameProcess:
 
     def _start_chainsaw(self):
         if self.chainsaw.start():
-            self.audio.play_meme_shout()
             self.audio.pause_music()
             self.audio.play("chainsaw", 0.9)
 
@@ -1496,8 +1495,6 @@ class GameProcess:
             return
         powerup.alive = False
         kind = powerup.kind
-        if self.mode == "meme":
-            self.audio.play_meme_shout()
         color = powerup.color
         message = ""
         self.effects.pickup(powerup.posX, powerup.posY, color)

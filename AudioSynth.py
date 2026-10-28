@@ -174,6 +174,11 @@ def make_sfx():
             [(523, 0.06), (659, 0.06), (784, 0.06), (1046, 0.16)], 0.4, "square"
         ),
         "meme_drum": lambda: sweep(148, 48, 0.36, "sine", 0.5, wobble=0.2),
+        "meme_water": lambda: sequence(
+            [(980, 0.045), (640, 0.09), (820, 0.05), (460, 0.13)],
+            0.2, "sine", gap=0.025
+        ),
+        "meme_air_raid": lambda: _air_raid_siren(),
         "meme_explode": lambda: noise_burst(0.22, 0.4, 0.25),
         "gameover": lambda: sequence([(220, 0.2), (196, 0.2), (175, 0.45)], 0.35, "triangle"),
     }
@@ -183,6 +188,28 @@ def make_sfx():
         except (pygame.error, ValueError, MemoryError):
             bank[name] = None
     return bank
+
+
+def _air_raid_siren():
+    """A short rising and falling two-tone warning siren for the hurricane."""
+    fmt = _mixer_format()
+    if fmt is None:
+        return None
+    sample_rate = fmt[0]
+    duration = 1.25
+    count = int(sample_rate * duration)
+    samples = []
+    phase = 0.0
+    for index in range(count):
+        t = index / sample_rate
+        # Three broad alarm sweeps, with a little overdriven edge.
+        cycle = (t % 0.42) / 0.42
+        frequency = 560.0 + 520.0 * (0.5 - 0.5 * math.cos(cycle * math.tau))
+        phase = (phase + frequency / sample_rate) % 1.0
+        tone = math.sin(phase * math.tau) + 0.22 * math.sin(phase * math.tau * 2.0)
+        envelope = _envelope(index, count, attack=0.04, release=0.12)
+        samples.append(max(-1.0, min(1.0, tone * envelope)))
+    return _sound_from_mono(samples, 0.42)
 
 
 def make_meme_loop():

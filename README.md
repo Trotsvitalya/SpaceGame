@@ -1,32 +1,28 @@
-# SpaceGame — аркадний космічний шутер
+# SpaceGame
 
-SpaceGame — 2D аркадний шутер на Python і Pygame. Гра має два режими, чотири кораблі, хвилі ворогів і босів, систему покращень, мем-події та український інтерфейс. Полотно гри має роздільність 1280×720; під час зміни розміру вікна кадр масштабується без згладжування, щоб текст та елементи HUD залишалися чіткими.
+**SpaceGame** is a 2D arcade space shooter built with Python and Pygame. Fight enemy waves and bosses, improve your ship, and explore a lighthearted Meme Mode. The game includes Ukrainian and English interfaces.
 
-## Можливості
+> Українська версія документації: [README.uk.md](README.uk.md).
 
-- **Режими гри:** нескінченні «Звичайний» і «Мемний», сюжетна кампанія з місіями та мережевий кооператив.
-- **Чотири кораблі:** Винищувач, Перехоплювач, Крейсер та Інженер мають різні характеристики, зброю й пасивні здібності.
-- **Зброя та прогрес:** чотири класи зброї, комбо-множник, уламки за ворогів і покращення між хвилями.
-- **Вороги та боси:** астероїди, п'ять типів кораблів ворога, небезпечні зони, промені та боси з кількома фазами атак.
-- **Мем-магазин:** накопичуйте мем-очки в мемному режимі, щоб купити заряд тигра або бензопили. Вартість: бензопила — 1 800, тигр — 4 000 мем-очок. Клавіша `1` купує/активує тигра, `2` — бензопилу: перше натискання купує заряд, наступне витрачає його.
-- **Суперздібність тигра:** відео програється до кінця та зникає; після нього повертається звичайне освітлення, з'являються кігті й гра продовжується під час ударів.
-- **Суперздібність бензопили:** коротка пауза й ефект розрізу екрана, потім чотири бензопили переслідують ворогів. Вороги тікають, не стріляють і не завдають шкоди гравцеві, поки триває переслідування.
-- **Випадковий бонус бензопили:** може випасти у мемному режимі; зібраний бонус одразу запускає ефект.
-- **Китайські мем-події:** «Солом'яний човен зі стрілами» (草船借箭) плавно пливе через екран, збирає стріли й відбиває їх під барабанне «咚»; вихор-пилосос тягне предмети до центру; також є золотий дракон і червоні конверти з ієрогліфом «福».
-- **Танець труни (抬棺):** після кожного 36-го знищеного ворога або кожного третього боса в мемному режимі з'являється процесія носіїв із труною. Під час анімації грає оригінальний синтезований електронний біт.
-- **Китайські вигуки й мем-звуки:** бонуси, мем-події, кігті тигра та бензопила відтворюють короткі варіативні бойові вигуки китайською з CC0-записів.
-- **Налаштування доступності:** гучність, повноекранний режим, тремтіння, якість графіки, зменшення спалахів, пауза при втраті фокуса та мова інтерфейсу.
-- **Збереження:** налаштування і таблиці рекордів зберігаються у JSON; гра безпечно запускається за відсутності аудіо-пристрою чи частини графічних файлів.
+## Features
 
-## Кампанія та кооператив
+- **Game modes:** Endless Normal and Meme modes, a mission campaign, and LAN/direct-IP co-op.
+- **Four ships:** Fighter, Interceptor, Cruiser, and Engineer, each with distinct weapons and passive bonuses.
+- **Combat progression:** enemy waves, multi-phase bosses, four weapon types, combo scoring, salvage, and upgrades between waves.
+- **Meme superpowers:** buy Tiger and Chainsaw charges with Meme Points. Press `1` for Tiger and `2` for Chainsaw; the first press buys a charge when you have enough points, and the next activates it.
+- **Tiger Ultimate:** the full video plays and disappears before the claw strikes begin. Lighting returns to normal as gameplay resumes.
+- **Chainsaw Ultimate:** pauses for a screen-split effect, then sends chainsaws after enemies. Enemies flee and ignore the player while it is active.
+- **Meme events:** a sailing straw boat collects arrows with drum, water, and Mandarin battle-call cues; a vacuum hurricane pulls nearby entities and sounds its own air-raid siren; a golden dragon attacks enemies; red envelopes can be collected; and Coffin Dance plays its synthesized dance loop. Coffin Dance is intentionally rare: it can appear every 36th kill or every third boss in Meme Mode.
+- **Sharp display scaling:** the game renders to a fixed 1280×720 canvas and scales it to the selected display size without filtering. Fullscreen and windowed sizes can be selected in Settings.
+- **Accessibility and persistence:** configurable sound, graphics quality, reduced flashes, screen shake, focus pause, and language. Settings, records, and campaign progress are saved locally.
 
-У кампанії є послідовність сюжетних місій із завданнями, зонами, ворогами та босами. Завершення місії відкриває наступну й може дати постійний запас уламків; місії можна повторювати, обираючи складність. Результат невдалої спроби не змінює таблицю рекордів нескінченного режиму.
+## Requirements
 
-У меню «Мультиплеєр» можна створити гру як хост або приєднатися за IP-адресою та портом. Гра використовує локальну мережу або доступне пряме мережеве з'єднання; автоматичного сервера/матчмейкінгу немає. Хост керує симуляцією, а другий гравець підключається зі своїм кораблем. Партнери можуть відроджувати одне одного, якщо підійдуть близько. Мережевий кооператив підтримує звичайні хвилі та кампанію.
+- Python 3.10 or newer
+- pygame-ce 2.5.8+ (or a compatible Pygame 2.5+ build)
+- An audio device is optional
 
-## Вимоги та встановлення
-
-Потрібен Python 3.10 або новіший та pygame-ce 2.5.8+ (або сумісний pygame 2.5+). Аудіо-пристрій необов'язковий.
+## Install and run
 
 ```bash
 git clone https://github.com/Trotsvitalya/SpaceGame.git
@@ -35,133 +31,104 @@ python -m pip install -r requirements.txt
 python MainGame.py
 ```
 
-У Windows гру можна запустити у віконному режимі:
+Use `python MainGame.py --windowed` (or `-w`) to force windowed mode. `F11` toggles fullscreen. In Settings, choose a display resolution/window size; the change applies immediately and is saved for the next launch. The window can also be resized by dragging its edge.
 
-```powershell
-python MainGame.py --windowed
-```
+## Controls
 
-Також працює скорочення `-w`. Щоб змінити розмір вікна, перетягніть його край. Клавіша `F11` перемикає повноекранний режим.
-
-## Керування
-
-| Дія | Клавіші |
+| Action | Keys |
 | --- | --- |
-| Рух | Стрілки або `WASD` |
-| Стріляти | `Space` (утримувати для автоматичної стрільби) |
-| Пауза / продовжити | `Esc` або `P` |
-| Перезапуск | `R` або `Enter` на паузі чи екрані завершення |
-| Головне меню | `M` або `Esc` на екрані завершення |
-| Повноекранний режим | `F11` |
-| Вибір покращення | `1`–`3`, стрілки й `Enter` або миша |
-| Мем-магазин | `1` — тигр; `2` — бензопила (купівля, потім активація) |
-| Меню та ангари | Стрілки / `WASD`, `Tab`, `Enter`, `Esc`; також миша |
+| Move | Arrow keys or `WASD` |
+| Fire | Hold `Space` |
+| Pause / resume | `Esc` or `P` |
+| Restart | `R`, or `Enter` on pause/game-over screens |
+| Return to menu | `M`, or `Esc` on the game-over screen |
+| Toggle fullscreen | `F11` |
+| Choose an upgrade | `1`–`3`, arrows and `Enter`, or mouse |
+| Buy / activate Tiger | `1` in Meme Mode |
+| Buy / activate Chainsaw | `2` in Meme Mode |
+| Navigate menus | Arrows / `WASD`, `Tab`, `Enter`, `Esc`, or mouse |
 
-У мемному режимі мем-очки нараховуються за набрані очки; ціна здібності списується з окремого гаманця, а не зі звичайного рахунку забігу. Смуга всередині картки показує наближення до ціни. Картка також показує наявні заряди.
+Meme Points are earned in Meme Mode and are held in a separate wallet from the run score. Power-up cards show progress toward their purchase cost and the number of charges owned.
 
-## Режими гри
+## Game modes
 
-### Звичайний
+### Normal Mode
 
-Класичний космічний шутер із синьо-блакитним оформленням, хвилями та босами.
+A classic space shooter with enemy waves, hazards, bosses, ship upgrades, and a restrained visual style.
 
-### Мемний
+### Meme Mode
 
-Мемний режим має власну палітру, репліки, звуки, музику та мем-очки. Кожні кілька секунд гра запускає одну з тематичних подій: човен збирає ворожі стріли, вихор притягує об'єкти до центру, дракон атакує ворогів, а червоні конверти можна збирати за бонусні очки. Мем-режим не містить контенту для дорослих.
+Features a separate palette, music, score wallet, sound effects, and timed visual events. During Straw Boat and Coffin Dance events, Mandarin battle shouts can play; regular bonus pickups do not play Chinese voice clips. The hurricane has a distinct synthesized air-raid siren, the boat combines a drum cue with water-like notes, and Coffin Dance uses its own upbeat synthesized music loop.
 
-Тигр може випасти під час звичайного випадіння предмета, якщо на екрані є щонайменше три живі вороги; шанс такого випадіння — 20%, з перезарядкою 18 секунд. Зібраний предмет запускає здібність одразу. Також тигра можна купити за 4 000 мем-очок. Для активації придбаного заряду натисніть `1`.
+Tiger power-ups can drop when at least three enemies are alive. Their drop chance is 20%, with an 18-second cooldown. A collected Tiger drop activates immediately. Tiger charges can also be purchased for 4,000 Meme Points; Chainsaw charges cost 1,800 Meme Points.
 
-## Кораблі та зброя
+## Ships
 
-| Корабель | Роль | Зброя | Пасивна здібність |
+| Ship | Role | Weapon | Passive |
 | --- | --- | --- | --- |
-| Винищувач | Універсальний | Імпульсна | Збалансовані параметри |
-| Перехоплювач | Маневрений | Черга | Додаткова невразливість після відродження |
-| Крейсер | Броньований | Пробивний промінь | Додатковий щит після відродження |
-| Інженер | Підтримка | Віяло пострілів | Більше уламків і магніт для бонусів |
+| Fighter | All-rounder | Pulse | Balanced stats |
+| Interceptor | Agile | Burst | Extra invulnerability after respawn |
+| Cruiser | Armored | Piercing lance | Extra shield after respawn |
+| Engineer | Support | Spread shot | More salvage and a wider pickup magnet |
 
-Рівень тимчасової зброї підвищується відповідним бонусом. Покращення «Мультивистріл» додає до залпу додаткові снаряди.
+## Waves and upgrades
 
-## Хвилі, боси та покращення
+Waves begin about every 24 seconds. Every fifth wave ends with a boss. After every third wave and after boss fights, choose an upgrade or skip it. Upgrades improve damage, fire rate, hull, multishot, engines, salvage collection, or shields.
 
-Нова хвиля починається приблизно кожні 24 секунди. Кожна п'ята хвиля завершується босом; типи босів чергуються, а їхня міцність зростає з номером хвилі. Боси попереджають про промені й небезпечні зони до того, як атаки завдадуть шкоди.
+## Settings and saved data
 
-За знищення ворогів нараховуються уламки та зростає серія комбо. Після кожної третьої хвилі й після боса можна вибрати одне з трьох доступних покращень або пропустити вибір:
+The Settings screen lets you set music and effects volume, mute audio, fullscreen, display resolution/window size, screen shake, FPS display, graphics quality, reduced flashes, pause-on-focus-loss, language, and difficulty. Changes are saved automatically.
 
-| Покращення | Максимум рівнів | Ефект |
-| --- | ---: | --- |
-| Шкода | 3 | Збільшує шкоду пострілів |
-| Швидкострільність | 3 | Скорочує затримку між залпами |
-| Корпус | 3 | Додає максимальне життя й відновлює одне |
-| Мультивистріл | 2 | Додає снаряди до залпу |
-| Двигун | 3 | Підвищує швидкість і прискорення |
-| Збір уламків | 3 | Збільшує здобич і радіус магніту |
-| Щит | 2 | Подовжує щит після відродження |
-
-Тимчасові бонуси: щит — 12 с, швидкострільність — 11 с, зброя — 18 с. Додаткові життя зберігаються до кінця забігу.
-
-## Налаштування і дані
-
-Файли `settings.json` і `scores.json` створюються в корені гри та не відстежуються Git. Щоб змінити директорію збережень (наприклад, для тестування), задайте змінну `SPACEGAME_CONFIG_DIR`:
+`settings.json`, `scores.json`, and campaign data are stored outside version control. To use a custom config directory:
 
 ```powershell
 $env:SPACEGAME_CONFIG_DIR = "C:\temp\spacegame-config"
 python MainGame.py
 ```
 
-У налаштуваннях можна змінити гучність музики та ефектів, вимкнути звук, тремтіння й спалахи, призупиняти гру при втраті фокуса, обрати якість графіки та українську чи англійську мову.
+## Audio and assets
 
-## Музика й звук
+Procedural sound effects and fallback music are created in `AudioSynth.py`. Optional music can be placed in `assets/music/GameProcess/` and `assets/music/Meme/` (MP3, OGG, WAV, or FLAC). See [ASSETS.md](ASSETS.md) for asset provenance and license notes. The included `wt034.ttf` font and Tiger media retain their original owners' terms.
 
-У `assets/music/GameProcess/` можна розміщувати аудіо для звичайного режиму, а в `assets/music/Meme/` — власну музику мемного режиму. Підтримуються формати MP3, OGG, WAV і FLAC; пошкоджені файли пропускаються. Якщо немає доступних треків, гра продовжує роботу з процедурним музичним циклом або без звуку. Бойові та мемні ефекти генеруються в `AudioSynth.py`.
+## Project map
 
-## Структура проєкту
-
-| Файл / каталог | Призначення |
+| Path | Purpose |
 | --- | --- |
-| `MainGame.py`, `AppClass.py` | Запуск гри, вікно, масштабування та перемикання сцен |
-| `MenuClass.py`, `UIClass.py` | Меню, ангар, налаштування та віджети |
-| `GameProcessClass.py` | Хвилі, зіткнення, магазин мем-сил, HUD і перебіг гри |
-| `TigerUltimate.py`, `ChainsawUltimate.py` | Відео тигра, кігті та бензопила |
-| `MemeEventSystem.py` | Китайські мем-події, човен, вихор і танець труни |
-| `UserShipClass.py`, `EnemyAsteroidClass.py` | Гравець, вороги, боси й зброя |
-| `GameData.py`, `Balance.py`, `CampaignData.py` | Параметри гри, баланс і кампанія |
-| `ResourcesClass.py`, `SpaceBackdrop.py`, `EffectsClass.py` | Графіка, шрифти, фон і ефекти |
-| `AudioClass.py`, `AudioSynth.py` | Музика й процедурні звуки |
-| `SettingsClass.py`, `Localization.py` | Збереження та локалізація |
-| `assets/` | Зображення, відео, шрифти, звуки та музика |
-| `screenshots/` | Актуальні знімки екрана гри |
-| `tests/` | Автоматичні модульні перевірки |
+| `MainGame.py`, `AppClass.py` | Startup, window, scaling, and scene changes |
+| `MenuClass.py`, `UIClass.py` | Menus, settings, hangar, and widgets |
+| `GameProcessClass.py` | Gameplay, waves, collisions, Meme shop, and HUD |
+| `TigerUltimate.py`, `ChainsawUltimate.py` | Superpower animations and combat behavior |
+| `MemeEventSystem.py` | Straw Boat, hurricane, dragon, envelopes, and Coffin Dance |
+| `AudioClass.py`, `AudioSynth.py` | Audio playback and generated sound bank |
+| `SettingsClass.py`, `Localization.py` | Saved preferences, scores, and translations |
+| `assets/` | Game images, fonts, video, sounds, and music |
+| `screenshots/` | In-game screenshots |
+| `tests/` | Automated tests |
 
-## Перевірка
+## Screenshots
 
-Запуск тестів (SDL працює у фоновому режимі):
+| Menus and settings | Gameplay and Meme Mode |
+| --- | --- |
+| ![Main menu](screenshots/StartMenu.png) | ![Gameplay](screenshots/Game.png) |
+| ![Settings](screenshots/Settings.png) | ![Meme shop](screenshots/Superpowers.png) |
+| ![Mode selection](screenshots/ModeSelect.png) | ![Boss](screenshots/Boss.png) |
+| ![Straw Boat](screenshots/StrawBoat.png) | ![Vacuum Hurricane](screenshots/VacuumHurricane.png) |
+| ![Coffin Dance](screenshots/CoffinDance.png) | ![Chainsaw](screenshots/Chainsaw.png) |
+
+## Validation
+
+Run the automated test suite:
 
 ```bash
 python -m unittest discover -s tests -v
 ```
 
-Перевірка синтаксису модулів:
+Check Python syntax:
 
 ```bash
 python -m py_compile *.py tools/*.py
 ```
 
-Щоб перегенерувати знімки екрана, виконайте `python tools/capture_screenshots.py`. Для оновлення процедурних кораблів та іконок бонусів скористайтеся `python tools/generate_assets.py`.
+## License
 
-## Знімки екрана
-
-| Меню та налаштування | Гра й суперздібності |
-| --- | --- |
-| ![Головне меню](screenshots/StartMenu.png) | ![Ігровий процес](screenshots/Game.png) |
-| ![Вибір режиму](screenshots/ModeSelect.png) | ![Мем-магазин](screenshots/Superpowers.png) |
-| ![Налаштування](screenshots/Settings.png) | ![Бос](screenshots/Boss.png) |
-| ![Човен пливе зі стрілами](screenshots/StrawBoat.png) | ![Вихор-пилосос](screenshots/VacuumHurricane.png) |
-| ![Золотий дракон](screenshots/GoldenDragon.png) | ![Червоні конверти](screenshots/RedEnvelopes.png) |
-| ![Танець труни](screenshots/CoffinDance.png) | ![Таблиця рекордів](screenshots/Leaderboard.png) |
-| ![Кігті тигра](screenshots/TigerClaws.png) | ![Бензопили](screenshots/Chainsaw.png) |
-| ![Завершення гри](screenshots/GameOver.png) | |
-
-## Ліцензія й походження ресурсів
-
-Код і нові процедурні ресурси поширюються за умовами [Unlicense](LICENSE). Раніше наявні зображення, музика й медіа зберігають свої початкові умови; файл [ASSETS.md](ASSETS.md) містить відомості про походження. Для відео тигра та шрифту `wt034.ttf` діють умови їхніх власників; включення у проєкт не змінює цих умов.
+The source code and original project assets are released under the [Unlicense](LICENSE). Third-party media and fonts retain their own license terms; see [ASSETS.md](ASSETS.md).

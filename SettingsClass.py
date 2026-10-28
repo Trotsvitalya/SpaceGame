@@ -31,6 +31,7 @@ DEFAULT_SETTINGS = {
     "sfx_volume": 0.7,
     "muted": False,
     "fullscreen": False,
+    "screen_resolution": "1280x720",
     "language": "uk",
     "mode": "normal",
     "difficulty": "normal",
@@ -44,6 +45,9 @@ DEFAULT_SETTINGS = {
     "last_host": "127.0.0.1",
     "last_port": 47521,
 }
+
+SCREEN_RESOLUTIONS = ("800x450", "960x540", "1280x720", "1600x900",
+                     "1920x1080", "2560x1440")
 
 
 def _as_text(value, default, limit, address=False):
@@ -108,6 +112,10 @@ def _as_quality(value, default=2):
         return default
 
 
+def _as_resolution(value, default="1280x720"):
+    return value if value in SCREEN_RESOLUTIONS else default
+
+
 class Settings:
     """Mutable settings object with crash-proof loading/saving."""
 
@@ -118,6 +126,9 @@ class Settings:
         self.sfx_volume = _as_float(data.get("sfx_volume"), DEFAULT_SETTINGS["sfx_volume"])
         self.muted = _as_bool(data.get("muted"), DEFAULT_SETTINGS["muted"])
         self.fullscreen = _as_bool(data.get("fullscreen"), DEFAULT_SETTINGS["fullscreen"])
+        self.screen_resolution = _as_resolution(
+            data.get("screen_resolution"), DEFAULT_SETTINGS["screen_resolution"]
+        )
         self.language = _as_language(data.get("language"))
         self.mode = _as_mode(data.get("mode"))
         self.difficulty = _as_difficulty(data.get("difficulty"))
@@ -158,6 +169,7 @@ class Settings:
             "sfx_volume": round(self.sfx_volume, 3),
             "muted": self.muted,
             "fullscreen": self.fullscreen,
+            "screen_resolution": self.screen_resolution,
             "language": self.language,
             "mode": self.mode,
             "difficulty": self.difficulty,
