@@ -518,7 +518,7 @@ class GameFlowTests(GameTestCase):
         pickup = game.powerups[-1]
         game._collect_powerup(pickup, game.player)
         game.tiger_ultimate.loader_thread.join(timeout=10)
-        self.assertEqual(len(game.tiger_ultimate.frames), 75)
+        self.assertEqual(len(game.tiger_ultimate.frames), 90)
         game.tiger_ultimate.phase = "reveal"
         game.tiger_ultimate.elapsed = .5
         game.draw(pygame.Surface((VW, VH), pygame.SRCALPHA))
@@ -555,6 +555,7 @@ class GameFlowTests(GameTestCase):
         ultimate = TigerUltimate()
         self.addCleanup(ultimate.close)
         ultimate.start()
+        ultimate.loader_thread.join(timeout=10)
         events = []
         for _ in range(160):
             event = ultimate.update(.05)
@@ -572,6 +573,45 @@ class GameFlowTests(GameTestCase):
             self.assertEqual(game.ship_kind, kind)
             self.assertTrue(game._spawn_tiger_powerup())
         self.app.resources.select_ship(original)
+
+    def test_meme_superpower_shop_uses_wallet_and_chainsaw_chase(self):
+        game = self.make_game("meme")
+        self.assertGreater(game.SUPERPOWER_COSTS["tiger"],
+                           game.SUPERPOWER_COSTS["chainsaw"])
+        game._add_score(game.SUPERPOWER_COSTS["chainsaw"] - 1)
+        buy = pygame.event.Event(pygame.KEYDOWN, key=pygame.K_2)
+        game.handle_event(buy)
+        self.assertEqual(game.superpower_charges["chainsaw"], 0)
+
+        game._add_score(1)
+        score_before_buy = game.score
+        game.handle_event(buy)
+        self.assertEqual(game.meme_points, 0)
+        self.assertEqual(game.score, score_before_buy)
+        self.assertEqual(game.superpower_charges["chainsaw"], 1)
+        game.handle_event(buy)
+        self.assertEqual(game.superpower_charges["chainsaw"], 0)
+        self.assertEqual(game.chainsaw.phase, "split")
+        game.draw(self.app.canvas)
+
+        enemy = EnemyShip("scout", "meme", self.app.resources,
+                          x=VW * .5, y=VH * .20)
+        enemy.entered = True
+        enemy.fire_timer = 0.0
+        game.enemies.append(enemy)
+        game.spawn_enemy_bullet(VW * .5, 250, math.pi / 2, 0)
+        frozen_time = game.time
+        for _ in range(16):
+            game.update(.05)
+        self.assertEqual(game.time, frozen_time + .05)
+        self.assertTrue(game.chainsaw.chasing)
+        self.assertEqual(game.enemy_bullets, [])
+        enemy_y = enemy.posY
+        game.update(.05)
+        self.assertLess(enemy.posY, enemy_y)
+        self.assertEqual(game.enemy_bullets, [])
+        game.draw(self.app.canvas)
+        self.assertEqual(game._player_hit(game.player), "none")
 
     def test_both_modes_run_headless(self):
         for mode in ("normal", "meme"):

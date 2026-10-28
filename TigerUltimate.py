@@ -16,7 +16,7 @@ from Localization import tr
 class TigerUltimate:
     """A timed cinematic. Frames are optional so a missing decoder fails safe."""
 
-    PHASES = (("freeze", .35), ("reveal", 2.5), ("claw_windup", .5),
+    PHASES = (("freeze", .35), ("reveal", 3.05), ("claw_windup", .42),
               ("claw_strike", 2.05), ("clear", .25), ("return", 1.25))
     CLAW_PATHS = (
         ((-.08, .20), (1.08, .78)),
@@ -129,6 +129,13 @@ class TigerUltimate:
                     if name == self.phase), len(self.PHASES))
         name, duration = self.PHASES[idx]
         if self.phase_time >= duration:
+            if (name == "reveal" and not self.frame_error
+                    and self.loader_thread is not None
+                    and self.loader_thread.is_alive()
+                    and len(self.frames) < len(self.frame_paths)):
+                self.phase_time = duration
+                self._update_particles(dt)
+                return None
             if name == "return" and audio_busy:
                 self.phase_time = duration
                 self._update_particles(dt)
@@ -207,11 +214,11 @@ class TigerUltimate:
             alpha = int(170 * max(0.0, 1.0 - self.phase_time / 1.25))
         overlay.fill((5, 4, 15, alpha))
         surface.blit(overlay, (0, 0))
-        if self.phase in ("reveal", "claw_windup", "claw_strike"):
+        if self.phase == "reveal":
             self._draw_tiger(surface)
         if self.phase in ("claw_windup", "claw_strike", "clear"):
             self._draw_claws(surface, reduced_flash, quality)
-        if self.phase in ("reveal", "claw_windup", "claw_strike"):
+        if self.phase == "reveal":
             if self.frame_error:
                 notice = tr(language, "tiger_video_error")
             elif not self.frames:
@@ -234,9 +241,8 @@ class TigerUltimate:
     def _draw_tiger(self, surface):
         if not self.frames:
             return
-        reveal = self.elapsed - self.PHASES[0][1]
         idx = min(len(self.frames) - 1,
-                  int(max(0, reveal) * self.fps))
+                  int(max(0, self.phase_time) * self.fps))
         frame = self.frames[idx]
         max_w, max_h = VW * .83, VH * .71
         scale = min(max_w / self.frame_size[0], max_h / self.frame_size[1])

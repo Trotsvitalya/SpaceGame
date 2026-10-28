@@ -236,7 +236,11 @@ class EnemyShip:
         if self.posY > VH + 140 or self.posX < -180 or self.posX > VW + 180:
             self.alive = False
 
-        if self.fire_timer <= 0 and self.posY > 24 and self.entered:
+        chainsaw_chasing = getattr(game, "chainsaw_chasing", False)
+        if chainsaw_chasing and self.fire_timer <= 0:
+            self.fire_timer = self.fire_range[1]
+        if (self.fire_timer <= 0 and self.posY > 24 and self.entered
+                and not chainsaw_chasing):
             self._fire(game)
             low, high = self.fire_range
             self.fire_timer = random.uniform(low, high) * self.balance.enemy_fire(

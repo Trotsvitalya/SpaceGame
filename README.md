@@ -143,19 +143,18 @@ game. Meme mode contains no adult content.
 
 Meme Mode can drop a **Tiger Ultimate** collectible when at least three
 enemies are alive. Collecting it freezes combat while the supplied tiger clip
-plays, then sends three visible claw slashes followed by four chainsaw sweeps
-through the arena. Enemies are defeated as each attack crosses them, with a
-final burst clearing any survivors. The supplied Chinese shout remains as the
-activation sound; embedded Chinese title frames and pickup text are omitted.
-The clip is preprocessed into transparent PNG frames with
-`python tools/preprocess_tiger.py --contains-title --last-clean-frame 74`
-(requires optional `opencv-python-headless`). The source media contents remain
-unchanged. In co-op the host decides enemy hits; clients mirror the timed
-visuals. The drop chance is 20% per eligible enemy drop event, with an
-18-second cooldown. The cinematic phases are freeze (0.35 s), reveal (2.50 s),
-claw windup (0.50 s), strike (2.05 s), clear (0.25 s), then a 1.25-second
-return fade. The return waits for the 6.64-second supplied audio to finish if
-needed.
+plays to its end, including its Chinese title frames. The video disappears
+before the claw windup and attack begin. The drop chance is 20% per eligible
+enemy drop event, with an 18-second cooldown.
+
+In Meme Mode, the top HUD also has two superpower slots: **1** for Tiger and
+**2** for Chainsaw. Meme points fill each slot toward its price (1,800 for
+Chainsaw and 4,000 for Tiger). Press the slot key once to buy a charge and
+again to use it. Tiger pauses the game for its full video and claw attack.
+Chainsaw pauses briefly for a screen-splitting slash, then four saws chase
+enemies for nine seconds. Enemies flee, stop firing, and cannot damage the
+player during the chase. Bought charges use a separate Meme Mode wallet, so
+spending them does not reduce the run score or record.
 
 ## Hangar: ships and weapons
 
