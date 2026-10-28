@@ -26,13 +26,14 @@ SETTINGS_PATH = _settings_path()
 SCORES_PATH = _scores_path()
 
 DEFAULT_SETTINGS = {
-    "version": 4,
+    "version": 5,
     "music_volume": 0.55,
     "sfx_volume": 0.7,
     "muted": False,
     "fullscreen": False,
     "language": "uk",
     "mode": "normal",
+    "difficulty": "normal",
     "screen_shake": True,
     "show_fps": False,
     "ship": "fighter",
@@ -63,6 +64,11 @@ def _as_mode(value, default="normal"):
     return value if value in ("normal", "meme") else default
 
 
+def _as_difficulty(value, default="normal"):
+    from Balance import DIFFICULTY_ORDER
+    return value if value in DIFFICULTY_ORDER else default
+
+
 def _as_ship(value, default="fighter"):
     from GameData import SHIP_ORDER
     return value if value in SHIP_ORDER else default
@@ -82,13 +88,14 @@ class Settings:
 
     def __init__(self, data=None):
         data = data if isinstance(data, dict) else {}
-        self.version = 4
+        self.version = 5
         self.music_volume = _as_float(data.get("music_volume"), DEFAULT_SETTINGS["music_volume"])
         self.sfx_volume = _as_float(data.get("sfx_volume"), DEFAULT_SETTINGS["sfx_volume"])
         self.muted = _as_bool(data.get("muted"), DEFAULT_SETTINGS["muted"])
         self.fullscreen = _as_bool(data.get("fullscreen"), DEFAULT_SETTINGS["fullscreen"])
         self.language = _as_language(data.get("language"))
         self.mode = _as_mode(data.get("mode"))
+        self.difficulty = _as_difficulty(data.get("difficulty"))
         self.screen_shake = _as_bool(data.get("screen_shake"), DEFAULT_SETTINGS["screen_shake"])
         self.show_fps = _as_bool(data.get("show_fps"), DEFAULT_SETTINGS["show_fps"])
         self.ship = _as_ship(data.get("ship"), DEFAULT_SETTINGS["ship"])
@@ -119,6 +126,7 @@ class Settings:
             "fullscreen": self.fullscreen,
             "language": self.language,
             "mode": self.mode,
+            "difficulty": self.difficulty,
             "screen_shake": self.screen_shake,
             "show_fps": self.show_fps,
             "ship": self.ship,

@@ -32,8 +32,8 @@ SHIPS = {
         "desc": "ship_interceptor_desc",
         "speed": 470.0,
         "acceleration": 4100.0,
-        "life": 2,
-        "max_life": 4,
+        "life": 3,
+        "max_life": 5,
         "fire_interval": 0.105,
         "hit_radius": 15.0,
         "weapon": "burst",
@@ -271,7 +271,9 @@ def boss_kind_for_wave(wave):
 
 
 def boss_hp_for_wave(wave):
-    return int(95 + max(1, int(wave)) * 11)
+    """Legacy helper: bounded boss health using the Normal preset."""
+    from Balance import Balance
+    return Balance("normal").boss_hp(wave)
 
 
 def upgrade_available(key, levels):

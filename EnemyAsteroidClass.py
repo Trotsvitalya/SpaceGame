@@ -12,8 +12,11 @@ import random
 
 import pygame
 
-from GameData import boss_hp_for_wave, boss_kind_for_wave
+from Balance import Balance
+from GameData import boss_kind_for_wave
 from utils import VH, VW, clamp
+
+_NORMAL_BALANCE = Balance("normal")
 
 
 class EnemyAsteroid:
@@ -116,13 +119,16 @@ class EnemyShip:
                   "target_y": 156.0, "fire": (1.9, 2.8)},
     }
 
-    def __init__(self, kind, mode, resources, x=None, y=-70, wave=1):
+    def __init__(self, kind, mode, resources, x=None, y=-70, wave=1,
+                 balance=None):
         stats = self.STATS.get(kind, self.STATS["scout"])
+        balance = balance or _NORMAL_BALANCE
         self.kind = kind if kind in self.STATS else "scout"
         self.mode = mode
+        self.balance = balance
         self.radius = stats["radius"]
         self.hit_radius = self.radius * 0.74
-        self.max_hp = max(1, int(round(stats["hp"] * (1.0 + 0.055 * (wave - 1)))))
+        self.max_hp = max(1, int(round(stats["hp"] * balance.enemy_hp(wave))))
         self.hp = self.max_hp
         self.score = stats["score"]
         self.wave = wave
@@ -131,7 +137,7 @@ class EnemyShip:
         self.start_x = self.posX
         self.base_x = self.posX
         self.target_y = stats["target_y"]
-        self.vy = stats["speed"] * (1.0 + 0.02 * (wave - 1))
+        self.vy = stats["speed"] * balance.enemy_speed(wave)
         self.phase = random.uniform(0, math.tau)
         self.time = 0.0
         self.drift = random.uniform(-55, 55)
@@ -233,8 +239,9 @@ class EnemyShip:
         if self.fire_timer <= 0 and self.posY > 24 and self.entered:
             self._fire(game)
             low, high = self.fire_range
-            scale = max(0.58, 1.0 - self.wave * 0.018)
-            self.fire_timer = random.uniform(low, high) * scale
+            self.fire_timer = random.uniform(low, high) * self.balance.enemy_fire(
+                self.wave
+            )
 
     def _animate(self, dt):
         if len(self.frames) <= 1:
@@ -252,7 +259,9 @@ class EnemyShip:
         ty = player.centery if player.alive else VH
         base_angle = math.atan2(ty - self.posY, tx - self.posX)
         nose_y = self.posY + self.radius * 0.7
-        speed = (320.0 if self.mode == "normal" else 340.0) + self.wave * 6.0
+        speed = self.balance.bullet_speed(self.wave) * (
+            320.0 if self.mode == "normal" else 340.0
+        )
 
         if self.kind == "scout":
             game.spawn_enemy_bullet(self.posX, nose_y, base_angle, speed)
@@ -284,7 +293,7 @@ class EnemyShip:
             if self.attack_index % 3 == 0:
                 # Telegraphed danger zone under the player's current position.
                 self.charge = 0.85
-                warn = 1.05
+                warn = self.balance.telegraph(1.20)
                 game.spawn_danger_zone(
                     clamp(tx, 80, VW - 80), clamp(ty, 120, VH - 120),
                     radius=104, warn=warn, duration=1.5,
@@ -353,17 +362,18 @@ class BossEnemy:
         },
     }
 
-    def __init__(self, mode, resources, wave, kind=None):
+    def __init__(self, mode, resources, wave, kind=None, balance=None):
         self.mode = mode
         self.resources = resources
         self.wave = wave
+        self.balance = balance or _NORMAL_BALANCE
         self.kind = kind if kind in self.KINDS else boss_kind_for_wave(wave)
         stats = self.KINDS[self.kind]
         self.radius = stats["radius"]
         self.hit_radius = stats["hit_radius"]
         self.name_key = stats["name"]
         self.base_color = stats["color"]
-        self.max_hp = boss_hp_for_wave(wave)
+        self.max_hp = self.balance.boss_hp(wave)
         self.hp = self.max_hp
         self.score = 2600 + wave * 130
         self.posX = VW * 0.5
@@ -486,10 +496,12 @@ class BossEnemy:
             base += 0.75
         if attack == "ring":
             base += 0.25
-        self.attack_timer = base * random.uniform(0.9, 1.1)
+        self.attack_timer = self.balance.boss_attack_delay(base) * random.uniform(0.9, 1.1)
 
     def _bullet_speed(self):
-        return (300.0 if self.mode == "normal" else 320.0) + self.wave * 5.0
+        return self.balance.boss_bullet_speed(
+            300.0 if self.mode == "normal" else 320.0, self.wave
+        )
 
     def _attack_fan(self, game, events):
         player = game.player
@@ -541,7 +553,8 @@ class BossEnemy:
         for direction in (-1, 1):
             game.spawn_beam(
                 self.posX + direction * 54, self.posY + 66,
-                base + direction * 0.42, warn=1.1, duration=0.55,
+                base + direction * 0.42, warn=self.balance.telegraph(1.20),
+                duration=0.55,
                 width=22.0, sweep=direction * 0.42,
                 color=(255, 120, 100) if self.mode == "normal" else (255, 140, 230),
             )
@@ -553,7 +566,8 @@ class BossEnemy:
         for index in range(4):
             angle = self.time * 0.4 + index * math.pi / 2
             game.spawn_beam(
-                self.posX, self.posY, angle, warn=1.15, duration=0.4,
+                self.posX, self.posY, angle, warn=self.balance.telegraph(1.25),
+                duration=0.4,
                 width=16.0, sweep=0.22 if index % 2 else -0.22,
                 color=(200, 140, 255) if self.mode == "normal" else (255, 120, 230),
             )
@@ -571,7 +585,8 @@ class BossEnemy:
         for x, y in targets:
             game.spawn_danger_zone(
                 clamp(x, 80, VW - 80), clamp(y, 120, VH - 130),
-                radius=random.uniform(74, 100), warn=1.15, duration=1.6,
+                radius=random.uniform(74, 100),
+                warn=self.balance.telegraph(1.25), duration=1.6,
             )
         events.append("zones")
         game.audio.play("boss_warn", 0.45, throttle_ms=240)

@@ -86,6 +86,23 @@ class SettingsTests(TempDirTestCase):
         self.assertFalse(settings.reduced_flash)
         self.assertTrue(settings.auto_pause)
 
+    def test_version_four_gains_difficulty_default(self):
+        with open(self.settings_path, "w", encoding="utf-8") as handle:
+            json.dump({"version": 4, "ship": "engineer", "mode": "meme"},
+                      handle)
+        settings = Settings.load(self.settings_path)
+        self.assertEqual(settings.difficulty, "normal")
+        self.assertEqual(settings.ship, "engineer")
+        self.assertEqual(settings.mode, "meme")
+
+    def test_difficulty_roundtrip_and_sanitizing(self):
+        settings = Settings({"difficulty": "hard"})
+        self.assertEqual(settings.difficulty, "hard")
+        self.assertEqual(Settings({"difficulty": "impossible"}).difficulty,
+                         "normal")
+        settings.save(self.settings_path)
+        self.assertEqual(Settings.load(self.settings_path).difficulty, "hard")
+
     def test_invalid_ship_and_quality_are_sanitized(self):
         settings = Settings({
             "ship": "battlecruiser",
@@ -105,7 +122,7 @@ class SettingsTests(TempDirTestCase):
         self.assertEqual(settings.music_volume, DEFAULT_SETTINGS["music_volume"])
         repaired = read_json(self.settings_path, None)
         self.assertIsInstance(repaired, dict)
-        self.assertEqual(repaired["version"], 4)
+        self.assertEqual(repaired["version"], DEFAULT_SETTINGS["version"])
 
     def test_invalid_values_are_sanitized(self):
         data = {

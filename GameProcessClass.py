@@ -13,6 +13,7 @@ import random
 import pygame
 
 from BulletClass import Bullet, EnemyBullet
+from Balance import Balance, BalanceMetrics
 from EffectsClass import Effects, ScreenShake
 from EnemyAsteroidClass import BossEnemy, EnemyAsteroid, EnemyShip
 from GameData import (SHIPS, UPGRADES, UPGRADE_ORDER, WEAPONS, ZONES,
@@ -45,7 +46,7 @@ class GameProcess:
         "elite": 6,
     }
 
-    def __init__(self, app, mode="normal"):
+    def __init__(self, app, mode="normal", difficulty=None):
         self.app = app
         self.mode = mode if mode in ("normal", "meme") else "normal"
         self.settings = app.settings
@@ -54,6 +55,9 @@ class GameProcess:
         self.language = self.settings.language
         self.palette = palette_for(self.mode)
         self.isRunMainLoop = True
+        self.difficulty = difficulty or getattr(self.settings, "difficulty", "normal")
+        self.balance = Balance(self.difficulty)
+        self.metrics = BalanceMetrics()
 
         self.world = pygame.Surface((VW, VH)).convert()
         self.backdrop = SpaceBackdrop(
@@ -95,6 +99,7 @@ class GameProcess:
         self.result = None
 
         self.spawn_timer = 1.15
+        self.spawn_grace = 0.0
         self.wave_timer = 0.0
         self.combo_chain = 0
         self.combo_timer = 0.0
@@ -358,6 +363,7 @@ class GameProcess:
             beam.update(dt)
         self.danger_zones = [zone for zone in self.danger_zones if zone.alive]
         self.beams = [beam for beam in self.beams if beam.alive]
+        self.metrics.note_hazards(len(self.danger_zones), len(self.beams))
 
     def _update_powerups(self, dt):
         for powerup in self.powerups:
@@ -386,6 +392,7 @@ class GameProcess:
         if self.wave_timer < self.WAVE_DURATION:
             return
         self.wave_timer = 0.0
+        self.metrics.note_wave(self.wave, self.WAVE_DURATION)
         self.wave += 1
         self._sync_zone(announce=True)
         if self.wave % 5 == 0:
@@ -396,9 +403,12 @@ class GameProcess:
             self.palette["accent"], 2.4,
         )
         self.audio.play("wave", 0.6)
+        if self.player.alive and self.player.life <= 1:
+            start_kind = random.choice(("shield", "life"))
+        else:
+            start_kind = random.choice(("weapon", "shield", "rapid"))
         self._spawn_powerup(
-            random.uniform(160, VW - 160), 120,
-            random.choice(("weapon", "shield", "rapid")),
+            random.uniform(160, VW - 160), 120, start_kind,
         )
         if self.wave % 3 == 0:
             self._open_upgrade()
@@ -459,14 +469,16 @@ class GameProcess:
             self._update_waves(dt)
         if self.state == "playing":
             self.spawn_timer -= dt
-            if self.spawn_timer <= 0 and self.boss is None:
+            if self.spawn_grace > 0:
+                self.spawn_grace = max(0.0, self.spawn_grace - dt)
+            elif self.spawn_timer <= 0 and self.boss is None:
                 self._spawn_enemy()
                 self.spawn_timer = self._spawn_interval()
 
     # ------------------------------------------------------------- spawning
     def _spawn_interval(self):
-        base = max(0.5, 1.42 - 0.074 * (self.wave - 1))
-        return base * random.uniform(0.7, 1.2)
+        base = self.balance.spawn_interval(self.wave)
+        return base * random.uniform(0.82, 1.18)
 
     def _spawn_enemy(self):
         if self.boss is not None or len(self.enemies) >= self.MAX_ENEMIES:
@@ -481,8 +493,16 @@ class GameProcess:
             pool = [kind for kind in zone["enemies"] if kind != "asteroid"]
             if self.wave < 4:
                 pool = [kind for kind in pool if kind in ("scout", "fighter")]
-            if self.wave < 6:
+            if self.wave < 8:
+                # Elites arrive after the first boss recovery window, never
+                # during the wave that follows it.
                 pool = [kind for kind in pool if kind != "elite"]
+            else:
+                elite_cap = 2 if self.wave >= 15 else 1
+                elites = sum(1 for enemy in self.enemies
+                             if getattr(enemy, "kind", "") == "elite")
+                if elites >= elite_cap:
+                    pool = [kind for kind in pool if kind != "elite"]
             if not pool:
                 pool = ["scout"]
             kind = "asteroid" if roll < 0.30 else random.choice(pool)
@@ -504,19 +524,22 @@ class GameProcess:
         image = self.resources.asteroid(index, radius)
         asteroid = EnemyAsteroid(
             VW, VH, image, None, x=x, y=y, radius=radius,
-            speed_scale=1.0 + 0.022 * (self.wave - 1), level=level,
+            speed_scale=self.balance.asteroid_speed(self.wave), level=level,
             resources=self.resources, rot_index=index,
         )
         if not defer:
             self.enemies.append(asteroid)
+        self.metrics.note_spawn("asteroid", at=self.game_time)
         return asteroid
 
     def _spawn_ship(self, kind, x=None, y=-70, wave=None):
         if len(self.enemies) >= self.MAX_ENEMIES:
             return None
         ship = EnemyShip(kind, self.mode, self.resources, x=x, y=y,
-                         wave=wave if wave is not None else self.wave)
+                         wave=wave if wave is not None else self.wave,
+                         balance=self.balance)
         self.enemies.append(ship)
+        self.metrics.note_spawn(kind, at=self.game_time)
         return ship
 
     def _spawn_boss(self):
@@ -532,7 +555,9 @@ class GameProcess:
         self.danger_zones.clear()
         self.beams.clear()
         self.boss = BossEnemy(self.mode, self.resources, self.wave,
-                              kind=boss_kind_for_wave(self.wave))
+                              kind=boss_kind_for_wave(self.wave),
+                              balance=self.balance)
+        self.metrics.note_boss()
         self.boss_drop_flags = {0.66: False, 0.33: False}
         warning_key = ("boss_warning_sentinel" if self.boss.kind == "sentinel"
                        else "boss_warning")
@@ -560,6 +585,7 @@ class GameProcess:
             clamp(x, 30, VW - 30), clamp(y, 90, VH - 80),
             kind, self.mode, self.resources,
         ))
+        self.metrics.note_powerup(kind)
 
     def _maybe_drop(self, enemy):
         chance = {
@@ -570,6 +596,16 @@ class GameProcess:
             "raider": 0.22,
             "elite": 0.55,
         }.get(enemy.kind, 0.1)
+        chance = self.balance.drop_chance(chance)
+        # Low-health pity: a struggling player gets a real chance at a shield
+        # or an extra hull instead of purely random weapon drops.
+        if (self.player.alive and self.player.life <= 1
+                and self.player.shield_timer <= 0):
+            chance = min(0.9, chance + 0.12)
+            if random.random() < 0.35:
+                self._spawn_powerup(enemy.posX, enemy.posY,
+                                    random.choice(("shield", "life")))
+                return
         if random.random() < chance:
             self._spawn_powerup(enemy.posX, enemy.posY, PowerUp.random_kind())
 
@@ -739,6 +775,7 @@ class GameProcess:
             return result
 
         # Dead.
+        self.metrics.note_damage()
         self.combo_chain = 0
         self.combo_timer = 0.0
         self.multiplier = 1
@@ -778,8 +815,9 @@ class GameProcess:
                     f"x{self.multiplier}", clamp(enemy.posX, 44, VW - 44),
                     clamp(enemy.posY - 20, 86, VH - 70), self.palette["warning"], 15, 0.9,
                 )
-        salvage = int(round(self.SALVAGE_REWARD.get(enemy.kind, 1)
-                            * self.player.salvage_mult))
+        salvage = self.balance.salvage(int(round(
+            self.SALVAGE_REWARD.get(enemy.kind, 1) * self.player.salvage_mult
+        )))
         if salvage > 0:
             self.salvage += salvage
         radius = float(getattr(enemy, "radius", 28))
@@ -830,7 +868,7 @@ class GameProcess:
         boss.alive = False
         self.kills += 1
         gained = self._register_kill(int(boss.score))
-        self.salvage += 20 + self.wave
+        self.salvage += self.balance.salvage(20 + self.wave)
         self.effects.text(
             f"+{gained}", boss.posX, boss.posY,
             self.palette["warning"], 30, 1.8,
@@ -846,6 +884,13 @@ class GameProcess:
         self.beams.clear()
         for kind, offset in (("weapon", -90), ("shield", 0), ("life", 90)):
             self._spawn_powerup(boss.posX + offset, boss.posY + 30, kind)
+        # Recovery window: heal, clear the arena and hold off new spawns for a
+        # few seconds after the upgrade overlay closes.
+        if self.player.alive:
+            for _ in range(self.balance.post_boss_heal):
+                self.player.heal()
+        self.spawn_grace = self.balance.post_boss_grace
+        self.spawn_timer = self.spawn_grace
         self.boss = None
         self.wave += 1
         self.wave_timer = 0.0
@@ -937,8 +982,8 @@ class GameProcess:
             color=self.palette["danger"],
         ))
         self.audio.play("hazard_warn", 0.5, throttle_ms=180)
-        if len(self.danger_zones) > 8:
-            self.danger_zones.pop(0)
+        if len(self.danger_zones) > self.balance.max_zones:
+            del self.danger_zones[:len(self.danger_zones) - self.balance.max_zones]
 
     def spawn_beam(self, x, y, angle, warn=1.0, duration=0.4, width=18.0,
                    sweep=0.0, color=None):
@@ -948,8 +993,8 @@ class GameProcess:
             color=color or self.palette["danger"],
         ))
         self.audio.play("beam_charge", 0.5, throttle_ms=220)
-        if len(self.beams) > 6:
-            self.beams.pop(0)
+        if len(self.beams) > self.balance.max_beams:
+            del self.beams[:len(self.beams) - self.balance.max_beams]
 
     # -------------------------------------------------------------- upgrades
     def _available_upgrades(self):
@@ -989,7 +1034,10 @@ class GameProcess:
             return
         self.state = "playing"
         self.upgrade_choices = []
-        self.spawn_timer = min(self.spawn_timer, 0.8)
+        if self.spawn_grace > 0:
+            self.spawn_timer = max(self.spawn_timer, self.spawn_grace)
+        else:
+            self.spawn_timer = min(self.spawn_timer, 0.8)
         self.audio.play("ui_click", 0.5)
 
     def _apply_upgrade(self, index):

@@ -12,6 +12,7 @@ import random
 
 import pygame
 
+from Balance import DIFFICULTY_ORDER
 from EffectsClass import Effects
 from GameData import SHIPS, SHIP_ORDER, WEAPONS, ZONES
 from Localization import LANGUAGE_NAMES, tr
@@ -253,10 +254,27 @@ class Menu:
                    lambda: 0 if self.settings.language == "uk" else 1,
                    self._set_language_index,
                    apply_language),
-            Button((cx - 130, top + 462, 260, 44),
+            Choice((left, top + 456, width, 40),
+                   lambda: tr(self.language, "difficulty"),
+                   [(key, tr(self.language, "difficulty_" + key))
+                    for key in DIFFICULTY_ORDER],
+                   lambda: self._difficulty_index(),
+                   self._set_difficulty_index,
+                   save_only),
+            Button((cx - 130, top + 510, 260, 44),
                    lambda: tr(self.language, "back"), "back", size=20),
         ]
         self.widgets = WidgetGroup(widgets, on_hover=self._hover_sound)
+
+    def _set_difficulty_index(self, index):
+        self.settings.difficulty = DIFFICULTY_ORDER[
+            max(0, min(len(DIFFICULTY_ORDER) - 1, int(index)))
+        ]
+        self.settings.save()
+
+    def _difficulty_index(self):
+        current = getattr(self.settings, "difficulty", "normal")
+        return DIFFICULTY_ORDER.index(current) if current in DIFFICULTY_ORDER else 1
 
     def _set_language_index(self, index):
         self.settings.language = "uk" if index == 0 else "en"
@@ -724,11 +742,11 @@ class Menu:
         palette = self.palette
         draw_text(canvas, self.resources, tr(self.language, "settings_title"), 38,
                   palette["text"], (VW // 2, 30), anchor="center", shadow=(2, 5, 14))
-        panel = pygame.Rect(VW // 2 - 390, 78, 780, 572)
+        panel = pygame.Rect(VW // 2 - 390, 78, 780, 620)
         draw_panel(canvas, panel, (*palette["panel"], 226), palette["border"], 16, 2)
         self.widgets.draw(canvas, self.resources, palette)
         draw_text(canvas, self.resources, tr(self.language, "settings_saved"), 11,
-                  palette["muted"], (VW // 2, panel.bottom + 12), anchor="center")
+                  palette["muted"], (VW // 2, panel.bottom + 8), anchor="center")
         if not self.audio.enabled:
             draw_text(canvas, self.resources, tr(self.language, "audio_unavailable"), 12,
                       palette["warning"], (VW // 2, panel.bottom + 30), anchor="center")
