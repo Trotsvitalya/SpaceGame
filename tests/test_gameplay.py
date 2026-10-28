@@ -539,7 +539,7 @@ class GameFlowTests(GameTestCase):
         game = self.make_game("meme")
         enemy = EnemyShip("scout", "meme", self.app.resources, x=200, y=150)
         game.enemies = [EnemyShip("scout", "meme", self.app.resources,
-                                  x=100+i*20, y=120) for i in range(7)]
+                                  x=100+i*20, y=120) for i in range(2)]
         with mock.patch("GameProcessClass.random.random", side_effect=[1.0, 0.0]):
             game._maybe_drop(enemy)
         self.assertFalse(game._has_tiger_powerup())

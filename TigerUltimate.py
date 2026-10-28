@@ -18,8 +18,8 @@ class TigerUltimate:
 
     PHASES = (("freeze", .35), ("reveal", 2.7), ("claw_windup", .65),
               ("claw_strike", .72), ("clear", .25), ("return", 1.25))
-    MIN_ENEMIES = 8
-    DROP_CHANCE = .08
+    MIN_ENEMIES = 3
+    DROP_CHANCE = .25
 
     def __init__(self, frames_dir=None):
         self.frames_dir = frames_dir or os.path.join(
