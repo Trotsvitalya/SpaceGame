@@ -286,6 +286,8 @@ class App:
         if view_w == VW and view_h == VH:
             window.blit(self.canvas, (offset_x, offset_y))
         else:
-            scaled = pygame.transform.smoothscale(self.canvas, (view_w, view_h))
+            # Keep text and UI edges crisp when a resizable window uses a
+            # non-native canvas size. Smooth scaling softened every glyph.
+            scaled = pygame.transform.scale(self.canvas, (view_w, view_h))
             window.blit(scaled, (offset_x, offset_y))
         pygame.display.flip()

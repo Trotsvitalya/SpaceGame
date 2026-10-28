@@ -173,6 +173,7 @@ def make_sfx():
         "meme_pickup": lambda: sequence(
             [(523, 0.06), (659, 0.06), (784, 0.06), (1046, 0.16)], 0.4, "square"
         ),
+        "meme_drum": lambda: sweep(148, 48, 0.36, "sine", 0.5, wobble=0.2),
         "meme_explode": lambda: noise_burst(0.22, 0.4, 0.25),
         "gameover": lambda: sequence([(220, 0.2), (196, 0.2), (175, 0.45)], 0.35, "triangle"),
     }

@@ -1,109 +1,57 @@
-# Asset provenance and licensing
+# Походження ресурсів і ліцензування
 
-## Tiger Ultimate source media
+## Відео Tiger Ultimate
 
-The supplied `assets/video/tiger.mp4` and
-`assets/sounds/tiger_hu_hu_sheng_wei.mp3` are user-provided source media. The
-video is 1280×720, 60 FPS and 3 seconds long; the audio is 6.64 seconds long.
-`assets/video/tiger_frames/` contains the game's processed 640×360, 30 FPS
-transparent PNG sequence, including the source clip's embedded Chinese title.
-`tools/preprocess_tiger.py --contains-title` regenerates the sequence from the
-original video without changing the source contents. The source provider's
-licensing terms still apply to these files and their derived frames.
+`assets/video/tiger.mp4` і `assets/sounds/tiger_hu_hu_sheng_wei.mp3` надані користувачем. Відео має роздільність 1280×720, частоту 60 кадрів/с і тривалість 3 секунди; аудіо триває 6,64 секунди. `assets/video/tiger_frames/` містить оброблену PNG-послідовність 640×360, 30 кадрів/с, із вбудованими китайськими символами з оригінального кліпу. Скрипт `tools/preprocess_tiger.py --contains-title` відновлює послідовність з оригіналу. Умови ліцензії постачальника медіа продовжують діяти.
 
-SpaceGame 2.0 uses a mix of original generated art, synthesized audio and media
-that shipped with the original project. This file records what is original,
-what is pre-existing and what that means if you redistribute the game.
+## Шрифт китайських символів
 
-The repository's [LICENSE](LICENSE) is the **Unlicense** (public domain). It
-applies to the source code and to the original assets listed below. It does
-**not** automatically relicense third-party media that predates 2.0.
+`assets/fonts/wt034.ttf` — наданий користувачем файл шрифту Kan Tan. Він використовується для китайських ієрогліфів у мем-подіях, зокрема 草船借箭, 咚, 龍來了, 吸 та 福. Умови використання й розповсюдження шрифту визначає його правовласник; цей репозиторій не змінює їх і не поширює його за ліцензією Unlicense.
 
-## Original 2.0 assets
+## Ліцензія проєкту
 
-### Generated sprite art
+[Unlicense](LICENSE) поширюється на вихідний код і нові оригінальні ресурси, описані нижче. Вона автоматично не змінює умови третіх сторін для старих медіа, відео тигра чи `wt034.ttf`.
 
-All files under these folders were created specifically for SpaceGame 2.0 by
-`tools/generate_assets.py` using procedural pygame drawing (no external images,
-textures or AI-generated art):
+## Оригінальні процедурні зображення
 
-| Folder | Files | Contents |
-| --- | --- | --- |
-| `assets/images/ships/` | 12 | 4 player ships × 3 animation frames |
-| `assets/images/enemies/` | 15 | 5 enemy types × 3 animation frames |
-| `assets/images/bosses/` | 4 | 2 bosses × 2 animation frames |
-| `assets/images/planets/` | 4 | Azure, verdant, ember and meme planets |
-| `assets/images/powerups/` | 5 | Shield, life, weapon, rapid, points icons |
-| `assets/images/bullets/` | 6 | Player pulse/burst/lance/spread and enemy orb/plasma |
+Зображення з перелічених каталогів створені для SpaceGame за допомогою процедурного малювання у `tools/generate_assets.py`:
 
-Total: **46 PNG files**. The generator is deterministic enough to reproduce the
-shipped look and writes only into the folders above.
+| Каталог | Вміст |
+| --- | --- |
+| `assets/images/ships/` | Чотири кораблі гравця, по три кадри |
+| `assets/images/enemies/` | П'ять типів ворогів, по три кадри |
+| `assets/images/bosses/` | Два боси, по два кадри |
+| `assets/images/planets/` | Планети та мемна планета |
+| `assets/images/powerups/` | Іконки щита, життя, зброї, швидкострільності, очок і спецбонусів |
+| `assets/images/bullets/` | Снаряди гравця й ворогів |
+| `screenshots/` | Оновлені знімки екрана, згенеровані тестовим ігровим стендом |
 
-**License:** dedicated to the public domain under the same Unlicense as the
-project. You may copy, modify, redistribute or sell them.
+Ці процедурні ресурси є оригінальною роботою проєкту й поширюються за Unlicense.
 
-To regenerate them:
+## Процедурний звук
 
-```bash
-python tools/generate_assets.py
-```
+`AudioSynth.py` синтезує ефекти гри під час роботи. Зовнішні файли для цих ефектів не потрібні. Вихідні звуки, створені для проєкту, поширюються за Unlicense.
 
-### Synthesized audio
+## Раніше наявні файли
 
-`AudioSynth.py` synthesizes the combat and UI sound effects at runtime (signed
-16-bit PCM handed to `pygame.mixer`). No audio files are written or shipped for
-these effects. This includes weapon fire, boss phase stingers, hazard warnings,
-beam charge, upgrade chimes, low-health alerts, UI clicks/hovers and the Meme
-mode procedural loop fallback.
+Ці ресурси були у проєкті до поточного оновлення. Їхнє початкове джерело й ліцензія не зафіксовані, тому вони не вважаються автоматично поширеними за Unlicense.
 
-**License:** original work, dedicated to the public domain under the Unlicense.
+| Шлях | Вміст |
+| --- | --- |
+| `assets/images/asteroids/`, `assets/images/asteroidsBoom/` | Астероїди й вибухи |
+| `assets/images/backgrounds/` | Фони |
+| `assets/images/userBullets/`, `assets/images/userStarShips/` | Старі спрайти гравця |
+| `assets/music/BackgroundMenu.mp3` | Музика меню |
+| `assets/music/GameProcess/` | Музика звичайного режиму |
+| `assets/sounds/*.mp3` | Раніше наявні звукові ефекти |
+| Інші файли `assets/fonts/*.ttf` | Шрифти попередньої версії |
 
-### Screenshots
+Перед комерційним розповсюдженням перевірте права на ці ресурси або замініть їх. Гра має процедурні резервні ресурси та може працювати без частини зображень, шрифтів або аудіо.
 
-`screenshots/2.0/*.jpg` are captures of this game produced by the headless QA
-harness. They show only original game content and may be reused with the
-project.
+## Шрифти інтерфейсу
 
-## Pre-existing assets (not relicensed)
+`assets/fonts/Space Age.ttf` використовується для великих латинських заголовків. Основний текст інтерфейсу бере шрифт системи з підтримкою кирилиці. Шрифт `wt034.ttf` використовується для китайських символів мем-подій. Інші файли TTF, що вже були в репозиторії, можуть не використовуватися інтерфейсом.
 
-These files shipped with SpaceGame before the 2.0 work and are kept for
-compatibility. Their original source and license are **not recorded in this
-repository**, so they remain under whatever terms they were originally
-distributed with and are excluded from the Unlicense dedication above.
+## Музика, додана гравцями
 
-| Path | Contents | Notes |
-| --- | --- | --- |
-| `assets/images/asteroids/` | Asteroid sprites | Pre-2.0 media |
-| `assets/images/asteroidsBoom/` | Explosion animation frames | Pre-2.0 media |
-| `assets/images/backgrounds/` | Parallax backgrounds | Pre-2.0 media |
-| `assets/images/userBullets/` | Legacy player bullet frames | Pre-2.0 media |
-| `assets/images/userStarShips/` | Legacy player ship frames | Pre-2.0 media |
-| `assets/music/BackgroundMenu.mp3` | Menu music | Pre-2.0 media |
-| `assets/music/GameProcess/*.mp3` | Normal-mode soundtrack | Pre-2.0 media |
-| `assets/sounds/*.mp3` | Shot/crash/game-over effects | Pre-2.0 media |
-| `assets/fonts/*.ttf` | Bundled decorative fonts | Pre-2.0 media |
-| `screenshots/*.png` | Earlier screenshots | Captures of pre-2.0 builds |
-
-If you plan to redistribute SpaceGame commercially, verify the rights for these
-files or replace them. The game is designed to keep running when images, fonts
-or audio are missing: procedural fallbacks are used for missing sprites and the
-audio layer degrades to silence.
-
-## Fonts
-
-- `assets/fonts/Space Age.ttf` is used only for large Latin display text.
-- UI/body text uses an installed system font with Cyrillic coverage (Segoe UI,
-  Tahoma, Arial, DejaVu Sans, Liberation Sans or Noto Sans). System fonts are
-  **not** redistributed with the game.
-- The other TTFs in `assets/fonts/` are pre-existing and unused by the 2.0 UI.
-
-## Music added by players
-
-`assets/music/Meme/` and the normal playlist folders are scanned at runtime.
-Any music you add there remains your responsibility; it is not part of the
-project and must not be committed unless you own or license it.
-
-## Third-party code
-
-Only Python, Pygame/pygame-ce and the standard library are required. See
-`requirements.txt`; those packages keep their own licenses.
+Музичні каталоги скануються під час запуску. Вміст, доданий гравцями, не є частиною проєкту й може потрапити до репозиторію лише за наявності відповідних прав.

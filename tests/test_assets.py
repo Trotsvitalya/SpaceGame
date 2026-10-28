@@ -41,6 +41,13 @@ class AssetTests(unittest.TestCase):
         self.assertGreater(image.get_width(), 0)
         self.assertIs(image, self.resources.text("Тест Test 123", 20, (255, 255, 255)))
 
+    def test_custom_chinese_font_renders_meme_glyphs(self):
+        font = self.resources.font(38, kind="chinese")
+        image = font.render("草船借箭 咚 吸 龍 福", True, (255, 220, 120))
+        self.assertGreater(image.get_width(), 0)
+        self.assertGreater(image.get_height(), 0)
+        self.assertIs(font, self.resources.font(38, kind="chinese"))
+
     def test_generated_decor(self):
         self.assertEqual(self.resources.vignette.get_size(), (1280, 720))
         self.assertEqual(self.resources.menu_grid.get_size(), (1280, 720))

@@ -23,6 +23,7 @@ from GameData import (SHIPS, UPGRADES, UPGRADE_ORDER, WEAPONS, ZONES,
                       zone_for_wave, zone_index_for_wave)
 from Hazards import BeamAttack, DangerZone
 from Localization import meme_taunt, tr
+from MemeEventSystem import MemeEventSystem
 from PowerUpClass import PowerUp
 from ResourcesClass import palette_for
 from SpaceBackdrop import SpaceBackdrop
@@ -107,6 +108,7 @@ class GameProcess:
         self.tiger_drop_cooldown = 0.0
         self.chainsaw = ChainsawUltimate()
         self.chainsaw_sound_timer = 0.0
+        self.meme_event = MemeEventSystem()
         self.meme_points = 0
         self.superpower_charges = {"tiger": 0, "chainsaw": 0}
         self.danger_zones = []
@@ -448,6 +450,11 @@ class GameProcess:
         ]
         for bullet in self.enemy_bullets:
             bullet.update(dt)
+            if (self.mode == "meme"
+                    and self.meme_event.absorbs_bullet(bullet)):
+                bullet.alive = False
+                self.effects.hit_sparks(bullet.posX, bullet.posY,
+                                         (255, 205, 108), count=4)
         self.enemy_bullets = [
             bullet for bullet in self.enemy_bullets
             if bullet.alive and not bullet.is_outside(VW, VH)
@@ -653,7 +660,8 @@ class GameProcess:
                 self._tiger_finish_strike()
             elif event == "done":
                 self.audio.resume_music()
-            return
+            if self.tiger_ultimate.phase in ("freeze", "reveal", "claw_windup"):
+                return
         if self.chainsaw.active:
             event, hits = self.chainsaw.update(dt, self._chainsaw_targets())
             for target in hits:
@@ -711,11 +719,22 @@ class GameProcess:
 
         # playing
         self.game_time += dt
+        if self.mode == "meme":
+            event = self.meme_event.update(dt)
+            if event == "start":
+                self.audio.play({
+                    "straw_boat": "meme_drum",
+                    "vacuum_hurricane": "meme_wow",
+                    "golden_dragon": "meme_boing",
+                    "red_envelopes": "meme_pickup",
+                }.get(self.meme_event.kind, "meme_boing"), 0.65)
         self.tiger_drop_cooldown = max(0.0, self.tiger_drop_cooldown - dt)
         self._update_player(dt)
         self._update_bullets(dt)
         self._update_enemies(dt)
         self._update_powerups(dt)
+        if self.mode == "meme":
+            self.meme_event.apply(self, dt)
         self._update_collisions()
         self._update_combo(dt)
         self._update_announcements(dt)
@@ -890,7 +909,8 @@ class GameProcess:
                                     random.choice(("shield", "life")))
                 return
         if random.random() < chance:
-            self._spawn_powerup(enemy.posX, enemy.posY, PowerUp.random_kind())
+            self._spawn_powerup(enemy.posX, enemy.posY,
+                                PowerUp.random_kind(self.mode))
         if (self.mode == "meme" and self.state == "playing"
                 and sum(1 for alive_enemy in self.enemies if alive_enemy.alive)
                 >= TigerUltimate.MIN_ENEMIES
@@ -925,6 +945,7 @@ class GameProcess:
         self.danger_zones.clear()
         self.beams.clear()
         self._hazard_hits.clear()
+        self.audio.resume_music()
 
     @property
     def chainsaw_chasing(self):
@@ -953,9 +974,7 @@ class GameProcess:
             if kind == "tiger":
                 self._start_tiger_ultimate()
             else:
-                self.chainsaw.start()
-                self.audio.pause_music()
-                self.audio.play("chainsaw", 0.9)
+                self._start_chainsaw()
             return
         cost = self.SUPERPOWER_COSTS[kind]
         if self.meme_points < cost:
@@ -976,6 +995,11 @@ class GameProcess:
         self.tiger_ultimate.start()
         self.audio.pause_music()
         self.audio.play_tiger_ultimate()
+
+    def _start_chainsaw(self):
+        if self.chainsaw.start():
+            self.audio.pause_music()
+            self.audio.play("chainsaw", 0.9)
 
     def _tiger_cut(self, kind, index):
         segment = TigerUltimate.cut_segment(kind, index)
@@ -1161,7 +1185,8 @@ class GameProcess:
     # --------------------------------------------------------------- damage
     def _player_hit(self, player=None):
         player = player or self.player
-        if self.tiger_ultimate.active or self.chainsaw.chasing:
+        if (self.tiger_ultimate.phase in ("freeze", "reveal", "claw_windup")
+                or self.chainsaw.chasing):
             return "none"
         result = player.take_hit()
         if result == "none":
@@ -1423,6 +1448,12 @@ class GameProcess:
         if not powerup.alive:
             return
         player = player or self.player
+        if powerup.kind == "chainsaw":
+            if self.chainsaw.active or self.tiger_ultimate.active:
+                return
+            powerup.alive = False
+            self._start_chainsaw()
+            return
         if powerup.kind == "tiger":
             if self.chainsaw.active:
                 return
@@ -1714,11 +1745,11 @@ class GameProcess:
             self.tiger_ultimate.draw(
                 canvas, getattr(self.settings, "reduced_flash", False),
                 getattr(self.settings, "effects_quality", 2), self.language)
-            if self.tiger_ultimate.phase == "return":
-                self._draw_hud(canvas)
-            if self.state == "paused":
-                self._draw_pause(canvas)
-            return
+            if self.tiger_ultimate.phase in (
+                    "freeze", "reveal", "claw_windup"):
+                if self.state == "paused":
+                    self._draw_pause(canvas)
+                return
         if self.state not in ("upgrade", "story", "victory"):
             self._draw_hud(canvas)
         if self.state == "dying":
@@ -1767,17 +1798,21 @@ class GameProcess:
             bullet.draw(world)
         for bullet in self.enemy_bullets:
             bullet.draw(world)
+            if self.mode == "meme":
+                self.meme_event.draw_arrow(world, bullet)
 
         for player in self.players:
             player.draw(world, self.resources, self.time, self.mode)
         self.effects.draw(world)
+        if self.mode == "meme":
+            self.meme_event.draw(world, self.resources)
 
     def _draw_superpower_shop(self, canvas):
         items = (("tiger", "1", (255, 188, 66)),
                  ("chainsaw", "2", (255, 112, 48)))
         for index, (kind, key, color) in enumerate(items):
-            x = VW - 330 + index * 96
-            rect = pygame.Rect(x, 15, 86, 53)
+            x = VW - 480 + index * 100
+            rect = pygame.Rect(x, 14, 92, 54)
             charged = self.superpower_charges[kind] > 0
             cost = self.SUPERPOWER_COSTS[kind]
             ratio = (1.0 if charged else
@@ -1788,7 +1823,7 @@ class GameProcess:
             draw_text(canvas, self.resources, key, 12, color,
                       (rect.x + 6, rect.y + 3))
             if kind == "tiger":
-                pygame.draw.circle(canvas, color, (rect.centerx, rect.y + 22), 12)
+                pygame.draw.circle(canvas, color, (rect.centerx, rect.y + 22), 14)
                 pygame.draw.polygon(canvas, color, ((rect.centerx - 10, rect.y + 15),
                                                     (rect.centerx - 8, rect.y + 7),
                                                     (rect.centerx - 2, rect.y + 14)))
@@ -1815,19 +1850,19 @@ class GameProcess:
                     pygame.draw.line(canvas, color, start, end, 2)
             label_key = ("superpower_tiger" if kind == "tiger"
                          else "superpower_chainsaw")
-            draw_text(canvas, self.resources, tr(self.language, label_key), 8,
+            draw_text(canvas, self.resources, tr(self.language, label_key), 10,
                       self.palette["text"], (rect.centerx, rect.y + 31),
                       anchor="midtop")
             value = (f"x{self.superpower_charges[kind]}" if charged else
                      format_score(cost))
-            draw_text(canvas, self.resources, value, 8,
+            draw_text(canvas, self.resources, value, 10,
                       color if charged or ratio >= 1.0 else self.palette["muted"],
                       (rect.right - 5, rect.y + 3), anchor="topright")
-            draw_bar(canvas, (rect.x + 7, rect.bottom - 7, rect.width - 14, 4),
+            draw_bar(canvas, (rect.x + 7, rect.bottom - 8, rect.width - 14, 5),
                      ratio, color, (28, 34, 54), None, 1)
         draw_text(canvas, self.resources,
                   f"{tr(self.language, 'meme_wallet')}: {format_score(self.meme_points)}",
-                  9, self.palette["muted"], (VW - 330, 69))
+                  10, self.palette["muted"], (VW - 480, 69))
 
     def _draw_hud(self, canvas):
         palette = self.palette

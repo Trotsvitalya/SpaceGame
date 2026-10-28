@@ -24,6 +24,7 @@ IMG_POWERUPS_HD = os.path.join(ROOT, "assets", "images", "powerups")
 IMG_BULLETS_HD = os.path.join(ROOT, "assets", "images", "bullets")
 FONT_BODY = os.path.join(ROOT, "assets", "fonts", "solid.ttf")
 FONT_TITLE = os.path.join(ROOT, "assets", "fonts", "Space Age.ttf")
+FONT_CHINESE = os.path.join(ROOT, "assets", "fonts", "wt034.ttf")
 
 ENEMY_DISPLAY_SIZE = {
     "scout": (58, 58),
@@ -429,6 +430,7 @@ class Resources:
             "bold": self._find_system_font(("segoeuisemibold", "segoeuibold", "tahomabd",
                                             "arialbd", "dejavusansbold", "liberationsansbold")),
             "title": FONT_TITLE,
+            "chinese": FONT_CHINESE,
         }
         if not self._font_files["body"]:
             self._font_files["body"] = self._font_files["bold"]
@@ -776,6 +778,7 @@ class Resources:
             "weapon": (255, 200, 76),
             "rapid": (120, 255, 180),
             "points": (196, 130, 255),
+            "chainsaw": (255, 112, 48),
             "tiger": (255, 186, 45),
         }
         color = colors.get(kind, palette["accent"])
@@ -810,6 +813,16 @@ class Resources:
             pygame.draw.polygon(surface, color, [(21, 28), (27, 28), (24, 32)])
             pygame.draw.line(surface, (255, 255, 255), (22, 34), (21, 39), 2)
             pygame.draw.line(surface, (255, 255, 255), (26, 34), (27, 39), 2)
+        elif kind == "chainsaw":
+            pygame.draw.rect(surface, color, (10, 18, 20, 12), border_radius=4)
+            pygame.draw.circle(surface, (225, 232, 238), (33, 24), 10, 3)
+            for tooth in range(8):
+                angle = tooth * math.tau / 8
+                pygame.draw.line(
+                    surface, (255, 239, 193),
+                    (33 + math.cos(angle) * 8, 24 + math.sin(angle) * 8),
+                    (33 + math.cos(angle + .1) * 14,
+                     24 + math.sin(angle + .1) * 14), 2)
         else:  # points
             points = []
             for index in range(10):

@@ -259,8 +259,12 @@ class EnemyShip:
     # ---------------------------------------------------------------- fire
     def _fire(self, game):
         player = game.target_player(self.posX, self.posY)
-        tx = player.centerx if player.alive else VW * 0.5
-        ty = player.centery if player.alive else VH
+        event = getattr(game, "meme_event", None)
+        if event is not None and event.kind == "straw_boat":
+            tx, ty = VW * .5, VH * .51
+        else:
+            tx = player.centerx if player.alive else VW * 0.5
+            ty = player.centery if player.alive else VH
         base_angle = math.atan2(ty - self.posY, tx - self.posX)
         nose_y = self.posY + self.radius * 0.7
         speed = self.balance.bullet_speed(self.wave) * (

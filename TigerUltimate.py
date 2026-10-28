@@ -16,7 +16,7 @@ from Localization import tr
 class TigerUltimate:
     """A timed cinematic. Frames are optional so a missing decoder fails safe."""
 
-    PHASES = (("freeze", .35), ("reveal", 3.05), ("claw_windup", .42),
+    PHASES = (("freeze", .35), ("reveal", 3.05), ("claw_windup", .14),
               ("claw_strike", 2.05), ("clear", .25), ("return", 1.25))
     CLAW_PATHS = (
         ((-.08, .20), (1.08, .78)),
@@ -209,11 +209,10 @@ class TigerUltimate:
         if not self.active:
             return
         overlay = pygame.Surface((VW, VH), pygame.SRCALPHA)
-        alpha = 215
-        if self.phase == "return":
-            alpha = int(170 * max(0.0, 1.0 - self.phase_time / 1.25))
-        overlay.fill((5, 4, 15, alpha))
-        surface.blit(overlay, (0, 0))
+        alpha = 215 if self.phase in ("freeze", "reveal") else 0
+        if alpha:
+            overlay.fill((5, 4, 15, alpha))
+            surface.blit(overlay, (0, 0))
         if self.phase == "reveal":
             self._draw_tiger(surface)
         if self.phase in ("claw_windup", "claw_strike", "clear"):

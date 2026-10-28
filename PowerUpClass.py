@@ -15,14 +15,15 @@ from utils import VH
 
 
 class PowerUp:
-    KINDS = ("shield", "life", "weapon", "rapid", "points", "tiger")
-    WEIGHTS = (26, 9, 27, 21, 17, 3)
+    KINDS = ("shield", "life", "weapon", "rapid", "points", "chainsaw", "tiger")
+    WEIGHTS = (26, 9, 27, 21, 17, 3, 3)
     COLORS = {
         "shield": (80, 190, 255),
         "life": (255, 92, 124),
         "weapon": (255, 200, 76),
         "rapid": (120, 255, 180),
         "points": (196, 130, 255),
+        "chainsaw": (255, 112, 48),
         "tiger": (255, 186, 45),
     }
 
@@ -46,14 +47,18 @@ class PowerUp:
             "weapon": "W",
             "rapid": "R",
             "points": "*",
+            "chainsaw": "C",
             "tiger": "T",
         }[self.kind]
 
     @classmethod
-    def random_kind(cls):
+    def random_kind(cls, mode="normal"):
         # Cinematic drops are gated by GameProcess and must never leak into
         # the standard random pickup table.
-        return random.choices(cls.KINDS[:-1], weights=cls.WEIGHTS[:-1], k=1)[0]
+        kinds, weights = cls.KINDS[:-1], cls.WEIGHTS[:-1]
+        if mode != "meme":
+            kinds, weights = kinds[:-1], weights[:-1]
+        return random.choices(kinds, weights=weights, k=1)[0]
 
     def update(self, dt, player=None):
         self.time += dt

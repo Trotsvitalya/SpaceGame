@@ -613,6 +613,35 @@ class GameFlowTests(GameTestCase):
         game.draw(self.app.canvas)
         self.assertEqual(game._player_hit(game.player), "none")
 
+    def test_chinese_meme_events_draw_and_apply_gameplay_effects(self):
+        game = self.make_game("meme")
+        game.meme_event.start("straw_boat")
+        game.spawn_enemy_bullet(VW * .5, VH * .51, math.pi / 2, 0)
+        game._update_bullets(.01)
+        self.assertEqual(game.enemy_bullets, [])
+        self.assertEqual(game.meme_event.arrow_count, 13)
+        game.draw(self.app.canvas)
+
+        enemy = EnemyShip("scout", "meme", self.app.resources,
+                          x=220, y=180)
+        game.enemies.append(enemy)
+        game.meme_event.start("vacuum_hurricane")
+        center = (VW * .5, VH * .48)
+        before = math.hypot(enemy.posX - center[0], enemy.posY - center[1])
+        game.meme_event.apply(game, .25)
+        after = math.hypot(enemy.posX - center[0], enemy.posY - center[1])
+        self.assertLess(after, before)
+        game.draw(self.app.canvas)
+
+    def test_tiger_claws_do_not_dim_the_restored_background(self):
+        ultimate = TigerUltimate()
+        canvas = pygame.Surface((VW, VH), pygame.SRCALPHA)
+        canvas.fill((40, 80, 120, 255))
+        ultimate.phase = "claw_strike"
+        ultimate.phase_time = 1.3
+        ultimate.draw(canvas)
+        self.assertEqual(canvas.get_at((10, 10)), (40, 80, 120, 255))
+
     def test_both_modes_run_headless(self):
         for mode in ("normal", "meme"):
             game = self.make_game(mode)
