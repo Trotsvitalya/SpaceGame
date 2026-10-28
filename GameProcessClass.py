@@ -322,7 +322,11 @@ class GameProcess:
 
     def _update_player(self, dt):
         for ship in self.players:
-            if ship.alive:
+            # Dead ships with remaining lives still need their update tick so
+            # the respawn timer can elapse. Downed co-op pilots at zero lives
+            # wait for a partner and must not auto-respawn.
+            if (ship.alive or (ship.life > 0
+                               and not getattr(ship, "downed", False))):
                 self._update_ship(ship, dt)
         self._check_run_end()
 

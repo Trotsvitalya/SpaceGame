@@ -495,6 +495,18 @@ class CollisionTests(GameTestCase):
 
 
 class GameFlowTests(GameTestCase):
+    def test_gameplay_loop_respawns_player_after_first_death(self):
+        game = self.make_game()
+        game.player.invulnerable_timer = 0
+        self.assertEqual(game._player_hit(game.player), "dead")
+        self.assertEqual(game.player.life, 2)
+        self.assertEqual(game.state, "playing")
+        for _ in range(32):
+            game.update(.05)
+        self.assertTrue(game.player.alive)
+        self.assertEqual(game.state, "playing")
+        self.assertGreater(game.player.invulnerable_timer, 0)
+
     def test_tiger_pickup_freezes_world_and_strike_clears_hostiles(self):
         game = self.make_game("meme")
         enemy = EnemyShip("scout", "meme", self.app.resources,
