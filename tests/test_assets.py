@@ -153,6 +153,23 @@ class AudioTests(unittest.TestCase):
         self.audio.apply_settings()
         self.assertAlmostEqual(self.audio._music_volume(), 0.4)
 
+    def test_every_weapon_has_a_sound(self):
+        if not self.audio.enabled:
+            self.skipTest("audio device unavailable")
+        from GameData import WEAPONS
+        required = {spec["sound"] for spec in WEAPONS.values()}
+        required.update({"upgrade_open", "upgrade_apply", "boss_phase",
+                         "hazard_warn", "beam_charge", "low_health"})
+        missing = {key for key in required if self.audio.sounds.get(key) is None}
+        self.assertEqual(missing, set())
+
+    def test_pause_without_music_is_safe(self):
+        self.audio.stop_music()
+        self.audio.pause_music()
+        self.assertFalse(self.audio.music_paused)
+        self.audio.resume_music()
+        self.assertFalse(self.audio.music_paused)
+
 
 if __name__ == "__main__":
     unittest.main()

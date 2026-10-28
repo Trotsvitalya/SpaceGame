@@ -63,7 +63,8 @@ class GameProcess:
         )
         self.zone_id = self.backdrop.zone["id"]
         self.effects = Effects(self.resources,
-                               quality=getattr(self.settings, "effects_quality", 2))
+                               quality=getattr(self.settings, "effects_quality", 2),
+                               reduced_flash=getattr(self.settings, "reduced_flash", False))
         self.shake = ScreenShake()
 
         self.ship_kind = getattr(self.settings, "ship", "fighter")
@@ -161,6 +162,11 @@ class GameProcess:
             return
         if event.type == pygame.KEYDOWN and event.key == pygame.K_F11:
             self.app.toggle_fullscreen()
+            return
+        if (event.type == getattr(pygame, "WINDOWFOCUSLOST", -1)
+                and getattr(self.settings, "auto_pause", True)):
+            if self.state == "playing":
+                self._pause()
             return
 
         if self.state == "upgrade":
@@ -335,7 +341,7 @@ class GameProcess:
                 self.palette["warning"] if phase == 2 else self.palette["danger"],
                 2.4, sub=tr(self.language, "boss_phase_hint"),
             )
-            self.audio.play("boss_warn", 0.7)
+            self.audio.play("boss_phase", 0.75)
             self.shake.add(0.35)
         elif event_name == "beam":
             self.audio.play("boss_warn", 0.45, throttle_ms=260)
@@ -749,6 +755,8 @@ class GameProcess:
         if self.player.life <= 0:
             self.state = "dying"
             self.death_timer = 1.8
+        else:
+            self.audio.play("low_health", 0.7)
         return result
 
     def _kill_enemy(self, enemy, award=True, drop=True):
@@ -926,6 +934,7 @@ class GameProcess:
             x, y, radius=radius, warn=warn, duration=duration,
             color=self.palette["danger"],
         ))
+        self.audio.play("hazard_warn", 0.5, throttle_ms=180)
         if len(self.danger_zones) > 8:
             self.danger_zones.pop(0)
 
@@ -936,6 +945,7 @@ class GameProcess:
             width=width, sweep=sweep,
             color=color or self.palette["danger"],
         ))
+        self.audio.play("beam_charge", 0.5, throttle_ms=220)
         if len(self.beams) > 6:
             self.beams.pop(0)
 
@@ -968,7 +978,7 @@ class GameProcess:
         ]
         self.upgrade_focus = 0
         self.state = "upgrade"
-        self.audio.play("powerup", 0.7)
+        self.audio.play("upgrade_open", 0.7)
         self.effects.ring(self.player.centerx, self.player.centery,
                           self.palette["warning"], 120, 0.7, 3)
 
@@ -999,8 +1009,7 @@ class GameProcess:
                    name=tr(self.language, spec["name"])),
                 VW // 2, 210, spec["color"], 20, 1.4,
             )
-            self.audio.play("weapon" if key in ("damage", "multishot") else "powerup",
-                            0.8)
+            self.audio.play("upgrade_apply", 0.8)
         self._close_upgrade()
 
     def _handle_upgrade_event(self, event, mouse):

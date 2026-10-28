@@ -26,7 +26,7 @@ SETTINGS_PATH = _settings_path()
 SCORES_PATH = _scores_path()
 
 DEFAULT_SETTINGS = {
-    "version": 3,
+    "version": 4,
     "music_volume": 0.55,
     "sfx_volume": 0.7,
     "muted": False,
@@ -37,6 +37,8 @@ DEFAULT_SETTINGS = {
     "show_fps": False,
     "ship": "fighter",
     "effects_quality": 2,
+    "reduced_flash": False,
+    "auto_pause": True,
 }
 
 
@@ -80,7 +82,7 @@ class Settings:
 
     def __init__(self, data=None):
         data = data if isinstance(data, dict) else {}
-        self.version = 3
+        self.version = 4
         self.music_volume = _as_float(data.get("music_volume"), DEFAULT_SETTINGS["music_volume"])
         self.sfx_volume = _as_float(data.get("sfx_volume"), DEFAULT_SETTINGS["sfx_volume"])
         self.muted = _as_bool(data.get("muted"), DEFAULT_SETTINGS["muted"])
@@ -93,6 +95,10 @@ class Settings:
         self.effects_quality = _as_quality(
             data.get("effects_quality"), DEFAULT_SETTINGS["effects_quality"]
         )
+        self.reduced_flash = _as_bool(
+            data.get("reduced_flash"), DEFAULT_SETTINGS["reduced_flash"]
+        )
+        self.auto_pause = _as_bool(data.get("auto_pause"), DEFAULT_SETTINGS["auto_pause"])
 
     @classmethod
     def load(cls, path=None):
@@ -117,6 +123,8 @@ class Settings:
             "show_fps": self.show_fps,
             "ship": self.ship,
             "effects_quality": self.effects_quality,
+            "reduced_flash": self.reduced_flash,
+            "auto_pause": self.auto_pause,
         }
 
     def save(self, path=None):

@@ -54,11 +54,15 @@ class SettingsTests(TempDirTestCase):
         settings = Settings.load(self.settings_path)
         settings.ship = "engineer"
         settings.effects_quality = 0
+        settings.reduced_flash = True
+        settings.auto_pause = False
         self.assertTrue(settings.save(self.settings_path))
 
         loaded = Settings.load(self.settings_path)
         self.assertEqual(loaded.ship, "engineer")
         self.assertEqual(loaded.effects_quality, 0)
+        self.assertTrue(loaded.reduced_flash)
+        self.assertFalse(loaded.auto_pause)
 
     def test_old_settings_gain_new_defaults(self):
         # Version 2 files predate the hangar and graphics options.
@@ -67,8 +71,20 @@ class SettingsTests(TempDirTestCase):
         settings = Settings.load(self.settings_path)
         self.assertEqual(settings.ship, "fighter")
         self.assertEqual(settings.effects_quality, 2)
+        self.assertFalse(settings.reduced_flash)
+        self.assertTrue(settings.auto_pause)
         self.assertAlmostEqual(settings.music_volume, 0.4)
         self.assertEqual(settings.language, "en")
+
+    def test_version_three_gains_accessibility_defaults(self):
+        with open(self.settings_path, "w", encoding="utf-8") as handle:
+            json.dump({"version": 3, "ship": "tank", "effects_quality": 1},
+                      handle)
+        settings = Settings.load(self.settings_path)
+        self.assertEqual(settings.ship, "tank")
+        self.assertEqual(settings.effects_quality, 1)
+        self.assertFalse(settings.reduced_flash)
+        self.assertTrue(settings.auto_pause)
 
     def test_invalid_ship_and_quality_are_sanitized(self):
         settings = Settings({
@@ -89,7 +105,7 @@ class SettingsTests(TempDirTestCase):
         self.assertEqual(settings.music_volume, DEFAULT_SETTINGS["music_volume"])
         repaired = read_json(self.settings_path, None)
         self.assertIsInstance(repaired, dict)
-        self.assertEqual(repaired["version"], 3)
+        self.assertEqual(repaired["version"], 4)
 
     def test_invalid_values_are_sanitized(self):
         data = {

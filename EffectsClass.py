@@ -166,7 +166,7 @@ class Effects:
 
     MAX_PARTICLES = 700
 
-    def __init__(self, resources, quality=None):
+    def __init__(self, resources, quality=None, reduced_flash=None):
         self.resources = resources
         self.particles = []
         self.texts = []
@@ -177,12 +177,21 @@ class Effects:
         self._flash_surface = pygame.Surface((VW, VH), pygame.SRCALPHA)
         if quality is None:
             quality = getattr(getattr(resources, "settings", None), "effects_quality", 2)
+        if reduced_flash is None:
+            reduced_flash = getattr(
+                getattr(resources, "settings", None), "reduced_flash", False
+            )
         self.set_quality(quality)
+        self.set_reduced_flash(reduced_flash)
 
     def set_quality(self, quality):
         self.quality = max(0, min(2, int(quality)))
         self.max_particles = (220, 420, self.MAX_PARTICLES)[self.quality]
         self.limit = (0.55, 0.78, 1.0)[self.quality]
+
+    def set_reduced_flash(self, reduced_flash):
+        """Tone full-screen flashes down for photosensitivity/comfort."""
+        self.reduced_flash = bool(reduced_flash)
 
     def clear(self):
         self.particles.clear()
@@ -364,6 +373,8 @@ class Effects:
 
     def flash(self, color, alpha):
         self.flash_color = color
+        if self.reduced_flash:
+            alpha *= 0.25
         self.flash_alpha = max(self.flash_alpha, min(160.0, alpha))
 
     def update(self, dt):

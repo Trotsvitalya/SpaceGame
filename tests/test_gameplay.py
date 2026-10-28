@@ -20,6 +20,7 @@ import pygame
 from AppClass import App
 from BulletClass import Bullet
 from EnemyAsteroidClass import BossEnemy, EnemyAsteroid, EnemyShip
+from EffectsClass import Effects
 from GameData import (SHIPS, SHIP_ORDER, UPGRADES, WEAPONS, ZONES,
                       boss_hp_for_wave, boss_kind_for_wave, upgrade_available,
                       upgrade_cost, zone_for_wave)
@@ -364,6 +365,29 @@ class BossAndZoneTests(GameTestCase):
         self.assertEqual(game.state, "upgrade")
         self.assertEqual(zone_for_wave(11)["id"], "ember")
         self.assertEqual(game.zone_id, "ember")
+
+
+class AccessibilityTests(GameTestCase):
+    def test_reduced_flash_scales_screen_flash(self):
+        normal = Effects(self.app.resources, quality=2, reduced_flash=False)
+        soft = Effects(self.app.resources, quality=2, reduced_flash=True)
+        normal.flash((255, 255, 255), 100)
+        soft.flash((255, 255, 255), 100)
+        self.assertAlmostEqual(normal.flash_alpha, 100.0)
+        self.assertAlmostEqual(soft.flash_alpha, 25.0)
+
+    def test_focus_loss_auto_pauses_only_when_enabled(self):
+        game = self.make_game()
+        original = self.app.settings.auto_pause
+        self.addCleanup(setattr, self.app.settings, "auto_pause", original)
+        self.app.settings.auto_pause = True
+        game.handle_event(pygame.event.Event(pygame.WINDOWFOCUSLOST))
+        self.assertEqual(game.state, "paused")
+        game._resume()
+        self.assertEqual(game.state, "playing")
+        self.app.settings.auto_pause = False
+        game.handle_event(pygame.event.Event(pygame.WINDOWFOCUSLOST))
+        self.assertEqual(game.state, "playing")
 
 
 class BackdropTests(GameTestCase):

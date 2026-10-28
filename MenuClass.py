@@ -77,7 +77,8 @@ class Menu:
             self.resources, "normal", zone=3, seed=random.randint(1, 99999),
             quality=quality, planet_scale=0.9,
         )
-        self.effects = Effects(self.resources, quality=quality)
+        self.effects = Effects(self.resources, quality=quality,
+                               reduced_flash=getattr(self.settings, "reduced_flash", False))
         self.decor = [MenuDeco(self.resources) for _ in range(5)]
         self.time = 0.0
         self.screen_fade = 255.0
@@ -179,6 +180,10 @@ class Menu:
         def save_only():
             self.settings.save()
 
+        def apply_effects():
+            self.effects.set_reduced_flash(self.settings.reduced_flash)
+            self.settings.save()
+
         def apply_language():
             self.language = self.settings.language
             self.audio.play("ui_click", 0.4)
@@ -195,50 +200,60 @@ class Menu:
             lambda: tr(self.language, "quality_high"),
         )
         widgets = [
-            Slider((left, top + 82, width, 40),
+            Slider((left, top - 4, width, 40),
                    lambda: tr(self.language, "music"),
                    lambda: self.settings.music_volume,
                    lambda value: setattr(self.settings, "music_volume", value),
                    save_and_apply),
-            Slider((left, top + 132, width, 40),
+            Slider((left, top + 42, width, 40),
                    lambda: tr(self.language, "sfx"),
                    lambda: self.settings.sfx_volume,
                    lambda value: setattr(self.settings, "sfx_volume", value),
                    save_and_apply),
-            Toggle((left, top + 186, width, 40),
+            Toggle((left, top + 88, width, 40),
                    lambda: tr(self.language, "mute"),
                    lambda: self.settings.muted,
                    lambda value: setattr(self.settings, "muted", value),
                    save_and_apply),
-            Toggle((left, top + 232, width, 40),
+            Toggle((left, top + 134, width, 40),
                    lambda: tr(self.language, "fullscreen"),
                    lambda: self.settings.fullscreen,
                    lambda value: setattr(self.settings, "fullscreen", value),
                    apply_fullscreen),
-            Toggle((left, top + 278, width, 40),
+            Toggle((left, top + 180, width, 40),
                    lambda: tr(self.language, "screen_shake"),
                    lambda: self.settings.screen_shake,
                    lambda value: setattr(self.settings, "screen_shake", value),
                    save_only),
-            Toggle((left, top + 324, width, 40),
+            Toggle((left, top + 226, width, 40),
                    lambda: tr(self.language, "show_fps"),
                    lambda: self.settings.show_fps,
                    lambda value: setattr(self.settings, "show_fps", value),
                    save_only),
-            Choice((left, top + 370, width, 40),
+            Choice((left, top + 272, width, 40),
                    lambda: tr(self.language, "effects_quality"),
                    [(0, quality_labels[0]), (1, quality_labels[1]),
                     (2, quality_labels[2])],
                    lambda: int(getattr(self.settings, "effects_quality", 2)),
                    self._set_quality_index,
                    save_only),
-            Choice((left, top + 416, width, 40),
+            Toggle((left, top + 318, width, 40),
+                   lambda: tr(self.language, "reduced_flash"),
+                   lambda: self.settings.reduced_flash,
+                   lambda value: setattr(self.settings, "reduced_flash", value),
+                   apply_effects),
+            Toggle((left, top + 364, width, 40),
+                   lambda: tr(self.language, "auto_pause"),
+                   lambda: self.settings.auto_pause,
+                   lambda value: setattr(self.settings, "auto_pause", value),
+                   save_only),
+            Choice((left, top + 410, width, 40),
                    lambda: tr(self.language, "language"),
                    [("uk", LANGUAGE_NAMES["uk"]), ("en", LANGUAGE_NAMES["en"])],
                    lambda: 0 if self.settings.language == "uk" else 1,
                    self._set_language_index,
                    apply_language),
-            Button((cx - 130, top + 466, 260, 44),
+            Button((cx - 130, top + 462, 260, 44),
                    lambda: tr(self.language, "back"), "back", size=20),
         ]
         self.widgets = WidgetGroup(widgets, on_hover=self._hover_sound)
@@ -702,16 +717,16 @@ class Menu:
 
     def _draw_settings(self, canvas):
         palette = self.palette
-        draw_text(canvas, self.resources, tr(self.language, "settings_title"), 40,
-                  palette["text"], (VW // 2, 50), anchor="center", shadow=(2, 5, 14))
-        panel = pygame.Rect(VW // 2 - 390, 88, 780, 528)
-        draw_panel(canvas, panel, (*palette["panel"], 224), palette["border"], 16, 2)
+        draw_text(canvas, self.resources, tr(self.language, "settings_title"), 38,
+                  palette["text"], (VW // 2, 30), anchor="center", shadow=(2, 5, 14))
+        panel = pygame.Rect(VW // 2 - 390, 78, 780, 572)
+        draw_panel(canvas, panel, (*palette["panel"], 226), palette["border"], 16, 2)
         self.widgets.draw(canvas, self.resources, palette)
         draw_text(canvas, self.resources, tr(self.language, "settings_saved"), 11,
-                  palette["muted"], (VW // 2, panel.bottom + 18), anchor="center")
+                  palette["muted"], (VW // 2, panel.bottom + 12), anchor="center")
         if not self.audio.enabled:
             draw_text(canvas, self.resources, tr(self.language, "audio_unavailable"), 12,
-                      palette["warning"], (VW // 2, panel.bottom + 38), anchor="center")
+                      palette["warning"], (VW // 2, panel.bottom + 30), anchor="center")
 
     def _draw_leaderboard(self, canvas):
         palette = self.palette
