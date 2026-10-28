@@ -1,5 +1,15 @@
 # Asset provenance and licensing
 
+## Tiger Ultimate source media
+
+The supplied `assets/video/tiger.mp4` and
+`assets/sounds/tiger_hu_hu_sheng_wei.mp3` are user-provided source media. The
+video is 1280×720, 60 FPS and 3 seconds long; the audio is 6.64 seconds long.
+`assets/video/tiger_frames/` contains the game's processed 640×360, 30 FPS
+transparent PNG sequence. `tools/preprocess_tiger.py` regenerates that sequence
+from the original video without changing its contents. The source provider's
+licensing terms still apply to these files and their derived frames.
+
 SpaceGame 2.0 uses a mix of original generated art, synthesized audio and media
 that shipped with the original project. This file records what is original,
 what is pre-existing and what that means if you redistribute the game.

@@ -776,6 +776,7 @@ class Resources:
             "weapon": (255, 200, 76),
             "rapid": (120, 255, 180),
             "points": (196, 130, 255),
+            "tiger": (255, 186, 45),
         }
         color = colors.get(kind, palette["accent"])
         surface = pygame.Surface((48, 48), pygame.SRCALPHA)
@@ -800,6 +801,15 @@ class Resources:
             pygame.draw.polygon(
                 surface, color, [(27, 11), (17, 25), (23, 25), (20, 37), (32, 21), (26, 21)]
             )
+        elif kind == "tiger":
+            pygame.draw.circle(surface, color, (24, 24), 11, 2)
+            pygame.draw.polygon(surface, color, [(14, 18), (16, 11), (21, 17)])
+            pygame.draw.polygon(surface, color, [(34, 18), (32, 11), (27, 17)])
+            pygame.draw.line(surface, color, (18, 22), (21, 25), 2)
+            pygame.draw.line(surface, color, (30, 22), (27, 25), 2)
+            pygame.draw.polygon(surface, color, [(21, 28), (27, 28), (24, 32)])
+            pygame.draw.line(surface, (255, 255, 255), (22, 34), (21, 39), 2)
+            pygame.draw.line(surface, (255, 255, 255), (26, 34), (27, 39), 2)
         else:  # points
             points = []
             for index in range(10):

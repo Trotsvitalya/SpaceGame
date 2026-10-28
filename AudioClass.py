@@ -59,6 +59,8 @@ class AudioManager:
         self.paused = False
         self.music_paused = False
         self.last_played = {}
+        self.tiger_sound = None
+        self.tiger_channel = None
         try:
             if pygame.mixer.get_init():
                 self.enabled = True
@@ -107,6 +109,62 @@ class AudioManager:
                 return
             channel.set_volume(max(0.0, min(1.0, self.settings.sfx_volume * volume)))
             channel.play(sound)
+        except pygame.error:
+            pass
+
+    def play_tiger_ultimate(self):
+        """Play the supplied Tiger audio exactly once per activation, if valid."""
+        if not self.enabled or self.settings.muted:
+            return False
+        if self.tiger_channel is not None:
+            try:
+                if self.tiger_channel.get_busy():
+                    return False
+            except pygame.error:
+                pass
+        if self.tiger_sound is None:
+            path = os.path.join(SOUND_DIR, "tiger_hu_hu_sheng_wei.mp3")
+            if not os.path.isfile(path):
+                path = os.path.join(SOUND_DIR, "audio.mp3")
+            try:
+                self.tiger_sound = pygame.mixer.Sound(path)
+            except (pygame.error, OSError):
+                return False
+        try:
+            self.tiger_channel = pygame.mixer.find_channel(True)
+            if self.tiger_channel is None:
+                return False
+            self.tiger_channel.set_volume(self.settings.sfx_volume)
+            self.tiger_channel.play(self.tiger_sound)
+            return True
+        except pygame.error:
+            return False
+
+    def pause_tiger_ultimate(self):
+        try:
+            if self.tiger_channel is not None:
+                self.tiger_channel.pause()
+        except pygame.error:
+            pass
+
+    def resume_tiger_ultimate(self):
+        try:
+            if self.tiger_channel is not None:
+                self.tiger_channel.unpause()
+        except pygame.error:
+            pass
+
+    def tiger_ultimate_busy(self):
+        try:
+            return bool(self.tiger_channel is not None and
+                        self.tiger_channel.get_busy())
+        except pygame.error:
+            return False
+
+    def stop_tiger_ultimate(self):
+        try:
+            if self.tiger_channel is not None:
+                self.tiger_channel.stop()
         except pygame.error:
             pass
 

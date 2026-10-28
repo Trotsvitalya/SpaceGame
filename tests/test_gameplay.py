@@ -30,6 +30,7 @@ from MenuClass import Menu
 from PowerUpClass import PowerUp
 from SettingsClass import Leaderboard, Settings
 from SpaceBackdrop import SpaceBackdrop
+from TigerUltimate import TigerUltimate
 from UserShipClass import UserShip
 from utils import VH, VW
 
@@ -494,6 +495,67 @@ class CollisionTests(GameTestCase):
 
 
 class GameFlowTests(GameTestCase):
+    def test_tiger_pickup_freezes_world_and_strike_clears_hostiles(self):
+        game = self.make_game("meme")
+        enemy = EnemyShip("scout", "meme", self.app.resources,
+                          x=VW * .5, y=180)
+        game.enemies.append(enemy)
+        game.spawn_enemy_bullet(VW * .5, 220, math.pi / 2, 0)
+        self.assertTrue(game._spawn_tiger_powerup())
+        self.assertFalse(game._spawn_tiger_powerup())
+        pickup = game.powerups[-1]
+        game._collect_powerup(pickup, game.player)
+        game.tiger_ultimate.loader_thread.join(timeout=10)
+        self.assertEqual(len(game.tiger_ultimate.frames), 90)
+        game.tiger_ultimate.phase = "reveal"
+        game.tiger_ultimate.elapsed = .5
+        game.draw(pygame.Surface((VW, VH), pygame.SRCALPHA))
+        self.assertTrue(game.tiger_ultimate.video_has_title)
+        x_before = enemy.posX
+        bullet_before = game.enemy_bullets[0].posY
+        game.update(.05)
+        self.assertEqual(enemy.posX, x_before)
+        self.assertEqual(game.enemy_bullets[0].posY, bullet_before)
+        game._tiger_strike()
+        self.assertEqual(game.enemies, [])
+        self.assertEqual(game.enemy_bullets, [])
+        self.assertEqual(game._player_hit(game.player), "none")
+
+    def test_tiger_bonus_is_meme_only_and_state_machine_finishes(self):
+        normal = self.make_game("normal")
+        self.assertFalse(normal._spawn_tiger_powerup())
+        game = self.make_game("meme")
+        enemy = EnemyShip("scout", "meme", self.app.resources, x=200, y=150)
+        game.enemies = [EnemyShip("scout", "meme", self.app.resources,
+                                  x=100+i*20, y=120) for i in range(7)]
+        with mock.patch("GameProcessClass.random.random", side_effect=[1.0, 0.0]):
+            game._maybe_drop(enemy)
+        self.assertFalse(game._has_tiger_powerup())
+        game.enemies.append(enemy)
+        with mock.patch("GameProcessClass.random.random", side_effect=[1.0, 0.0]):
+            game._maybe_drop(enemy)
+        self.assertTrue(game._has_tiger_powerup())
+        ultimate = TigerUltimate()
+        self.addCleanup(ultimate.close)
+        ultimate.start()
+        events = []
+        for _ in range(160):
+            event = ultimate.update(.05)
+            if event:
+                events.append(event)
+        self.assertIn("strike", events)
+        self.assertIn("done", events)
+        self.assertFalse(ultimate.active)
+
+    def test_tiger_pickup_is_available_for_each_ship_in_meme_mode(self):
+        original = self.app.settings.ship
+        for kind in ("fighter", "interceptor", "tank", "engineer"):
+            self.app.resources.select_ship(kind)
+            game = self.make_game("meme")
+            self.assertEqual(game.ship_kind, kind)
+            self.assertTrue(game._spawn_tiger_powerup())
+        self.app.resources.select_ship(original)
+
     def test_both_modes_run_headless(self):
         for mode in ("normal", "meme"):
             game = self.make_game(mode)

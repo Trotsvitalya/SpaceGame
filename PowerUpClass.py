@@ -15,14 +15,15 @@ from utils import VH
 
 
 class PowerUp:
-    KINDS = ("shield", "life", "weapon", "rapid", "points")
-    WEIGHTS = (26, 9, 27, 21, 17)
+    KINDS = ("shield", "life", "weapon", "rapid", "points", "tiger")
+    WEIGHTS = (26, 9, 27, 21, 17, 3)
     COLORS = {
         "shield": (80, 190, 255),
         "life": (255, 92, 124),
         "weapon": (255, 200, 76),
         "rapid": (120, 255, 180),
         "points": (196, 130, 255),
+        "tiger": (255, 186, 45),
     }
 
     def __init__(self, x, y, kind, mode="normal", resources=None):
@@ -45,11 +46,14 @@ class PowerUp:
             "weapon": "W",
             "rapid": "R",
             "points": "*",
+            "tiger": "虎",
         }[self.kind]
 
     @classmethod
     def random_kind(cls):
-        return random.choices(cls.KINDS, weights=cls.WEIGHTS, k=1)[0]
+        # Cinematic drops are gated by GameProcess and must never leak into
+        # the standard random pickup table.
+        return random.choices(cls.KINDS[:-1], weights=cls.WEIGHTS[:-1], k=1)[0]
 
     def update(self, dt, player=None):
         self.time += dt

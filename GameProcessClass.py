@@ -26,6 +26,7 @@ from PowerUpClass import PowerUp
 from ResourcesClass import palette_for
 from SpaceBackdrop import SpaceBackdrop
 from UIClass import Button, WidgetGroup, draw_bar, draw_panel, draw_text
+from TigerUltimate import TigerUltimate
 from UserShipClass import UserShip
 from utils import (VH, VW, circle_hit, clamp, format_score, format_time,
                    lerp, segment_circle_hit)
@@ -100,6 +101,8 @@ class GameProcess:
         self.enemy_bullets = []
         self.enemies = []
         self.powerups = []
+        self.tiger_ultimate = TigerUltimate()
+        self.tiger_drop_cooldown = 0.0
         self.danger_zones = []
         self.beams = []
         self.boss = None
@@ -173,6 +176,9 @@ class GameProcess:
         self.music_started = True
 
     def on_exit(self):
+        self.tiger_ultimate.cancel()
+        self.tiger_ultimate.close()
+        self.audio.stop_tiger_ultimate()
         self.audio.stop_music()
 
     def _restart(self):
@@ -618,6 +624,14 @@ class GameProcess:
         if self.state == "paused":
             return
         dt = min(max(dt, 0.0), 0.05)
+        if self.tiger_ultimate.active:
+            event = self.tiger_ultimate.update(
+                dt, audio_busy=self.audio.tiger_ultimate_busy())
+            if event == "strike":
+                self._tiger_strike()
+            elif event == "done":
+                self.audio.resume_music()
+            return
         self.time += dt
         if self.settings.screen_shake:
             self.shake.update(dt)
@@ -651,6 +665,7 @@ class GameProcess:
 
         # playing
         self.game_time += dt
+        self.tiger_drop_cooldown = max(0.0, self.tiger_drop_cooldown - dt)
         self._update_player(dt)
         self._update_bullets(dt)
         self._update_enemies(dt)
@@ -830,6 +845,48 @@ class GameProcess:
                 return
         if random.random() < chance:
             self._spawn_powerup(enemy.posX, enemy.posY, PowerUp.random_kind())
+        if (self.mode == "meme" and self.state == "playing"
+                and sum(1 for alive_enemy in self.enemies if alive_enemy.alive)
+                >= TigerUltimate.MIN_ENEMIES
+                and self.tiger_drop_cooldown <= 0
+                and not self._has_tiger_powerup()
+                and not self.tiger_ultimate.active
+                and random.random() < TigerUltimate.DROP_CHANCE):
+            self._spawn_tiger_powerup(enemy.posX, enemy.posY)
+
+    def _has_tiger_powerup(self):
+        return any(p.alive and p.kind == "tiger" for p in self.powerups)
+
+    def _spawn_tiger_powerup(self, x=None, y=None):
+        """Controlled creation hook for tests and gameplay debugging."""
+        if (self.mode != "meme" or self._has_tiger_powerup()
+                or self.tiger_ultimate.active):
+            return False
+        if len(self.powerups) >= self.MAX_POWERUPS:
+            return False
+        if x is None:
+            x, y = VW * .5, VH * .55
+        self._spawn_powerup(x, y, "tiger")
+        self.tiger_drop_cooldown = 18.0
+        return True
+
+    def _tiger_strike(self):
+        for enemy in self.enemies:
+            enemy.alive = False
+        self.enemies.clear()
+        self.enemy_bullets.clear()
+        self.player_bullets.clear()
+        self.pending_asteroids.clear()
+        self.danger_zones.clear()
+        self.beams.clear()
+        self._hazard_hits.clear()
+        self.effects.clear()
+        if self.boss is not None:
+            # The attack damages only bosses whose current phase is not mission-scripted.
+            scripted = bool(self.campaign and self.campaign_mission.get("boss"))
+            if not scripted:
+                self._defeat_boss()
+
 
     # ------------------------------------------------------------ collisions
     def _bullet_hit_target(self, bullet, target):
@@ -988,6 +1045,8 @@ class GameProcess:
     # --------------------------------------------------------------- damage
     def _player_hit(self, player=None):
         player = player or self.player
+        if self.tiger_ultimate.active:
+            return "none"
         result = player.take_hit()
         if result == "none":
             return result
@@ -1242,6 +1301,14 @@ class GameProcess:
         if not powerup.alive:
             return
         player = player or self.player
+        if powerup.kind == "tiger":
+            powerup.alive = False
+            self.effects.text(tr(self.language, "tiger_ultimate_pickup"),
+                              VW * .5, VH * .37, (255, 206, 86), 30, 1.6)
+            self.tiger_ultimate.start()
+            self.audio.pause_music()
+            self.audio.play_tiger_ultimate()
+            return
         powerup.alive = False
         kind = powerup.kind
         color = powerup.color
@@ -1419,6 +1486,7 @@ class GameProcess:
             return
         self.state = "paused"
         self.audio.pause_music()
+        self.audio.pause_tiger_ultimate()
         self.audio.play("ui_click", 0.5)
         self._build_pause_widgets()
 
@@ -1427,6 +1495,7 @@ class GameProcess:
             return
         self.state = "playing"
         self.audio.resume_music()
+        self.audio.resume_tiger_ultimate()
         self.audio.play("ui_click", 0.4)
         self.pause_group = None
 
@@ -1519,6 +1588,15 @@ class GameProcess:
         canvas.blit(self.world, (offset_x, offset_y))
         self.effects.draw_flash(canvas)
         canvas.blit(self.resources.vignette, (0, 0))
+        if self.tiger_ultimate.active:
+            self.tiger_ultimate.draw(
+                canvas, getattr(self.settings, "reduced_flash", False),
+                getattr(self.settings, "effects_quality", 2), self.language)
+            if self.tiger_ultimate.phase == "return":
+                self._draw_hud(canvas)
+            if self.state == "paused":
+                self._draw_pause(canvas)
+            return
         if self.state not in ("upgrade", "story", "victory"):
             self._draw_hud(canvas)
         if self.state == "dying":

@@ -141,6 +141,17 @@ your own music, drop audio files into `assets/music/Meme/` (see the README in
 that folder). Invalid or unsupported files are skipped and never crash the
 game. Meme mode contains no adult content.
 
+Meme Mode can drop a **Tiger Ultimate** collectible when at least eight
+enemies are alive. Collecting it freezes combat while the supplied tiger clip
+plays, then performs an animated claw strike that clears ordinary enemies and
+hostile projectiles. The clip is preprocessed into transparent PNG frames with
+`python tools/preprocess_tiger.py --contains-title` (requires optional
+`opencv-python-headless`). The source media contents remain unchanged.
+The drop chance is 8% per eligible enemy drop event, with an 18-second
+cooldown. The cinematic phases are freeze (0.35 s), reveal (2.70 s), claw
+windup (0.65 s), strike (0.72 s), clear (0.25 s), then a 1.25-second return
+fade. The return waits for the 6.64-second supplied audio to finish if needed.
+
 ## Hangar: ships and weapons
 
 Each hull pairs a weapon class with a passive ability. Stats are rated 1–5 and
