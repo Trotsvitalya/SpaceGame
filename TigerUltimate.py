@@ -245,8 +245,8 @@ class TigerUltimate:
         frame = self.frames[idx]
         max_w, max_h = VW * .83, VH * .71
         scale = min(max_w / self.frame_size[0], max_h / self.frame_size[1])
-        image = pygame.transform.smoothscale(frame, (max(1, int(frame.get_width()*scale)),
-                                                      max(1, int(frame.get_height()*scale))))
+        image = pygame.transform.scale(frame, (max(1, int(frame.get_width() * scale)),
+                                                 max(1, int(frame.get_height() * scale))))
         box = (self.frame_boxes[idx] if idx < len(self.frame_boxes)
                else (0, 0, self.frame_size[0], self.frame_size[1]))
         left = VW * .5 - self.frame_size[0] * scale * .5 + box[0] * scale

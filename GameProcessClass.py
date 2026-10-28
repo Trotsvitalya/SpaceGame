@@ -109,6 +109,7 @@ class GameProcess:
         self.chainsaw = ChainsawUltimate()
         self.chainsaw_sound_timer = 0.0
         self.meme_event = MemeEventSystem()
+        self.coffin_bosses = 0
         self.meme_points = 0
         self.superpower_charges = {"tiger": 0, "chainsaw": 0}
         self.danger_zones = []
@@ -918,6 +919,7 @@ class GameProcess:
     def _update_meme_event(self, dt):
         event = self.meme_event.update(dt)
         if event == "start":
+            self.audio.play_meme_shout()
             if self.meme_event.kind == "coffin_dance":
                 self.audio.play_coffin_dance()
             else:
@@ -936,6 +938,7 @@ class GameProcess:
             return False
         started = self.meme_event.start("coffin_dance")
         if started:
+            self.audio.play_meme_shout()
             self.audio.play_coffin_dance()
         return started
 
@@ -958,6 +961,8 @@ class GameProcess:
     def _tiger_strike(self):
         # The cinematic keeps combat paused, but attacks resolve progressively
         # as each visible claw or saw crosses the arena.
+        if self.mode == "meme":
+            self.audio.play_meme_shout()
         self.enemy_bullets.clear()
         self.player_bullets.clear()
         self.pending_asteroids.clear()
@@ -1017,6 +1022,7 @@ class GameProcess:
 
     def _start_chainsaw(self):
         if self.chainsaw.start():
+            self.audio.play_meme_shout()
             self.audio.pause_music()
             self.audio.play("chainsaw", 0.9)
 
@@ -1262,7 +1268,7 @@ class GameProcess:
         enemy._handled = True
         enemy.alive = False
         self.kills += 1
-        if (self.mode == "meme" and self.kills % 12 == 0
+        if (self.mode == "meme" and self.kills % 36 == 0
                 and not self.tiger_ultimate.active and not self.chainsaw.active):
             self._start_coffin_dance()
         if award:
@@ -1339,7 +1345,9 @@ class GameProcess:
         self.audio.play("crash", 1.0)
         if self.mode == "meme":
             self.audio.play("meme_explode", 0.9)
-            self._start_coffin_dance()
+            self.coffin_bosses += 1
+            if self.coffin_bosses % 3 == 0:
+                self._start_coffin_dance()
         self.shake.add(1.0)
         self.enemy_bullets.clear()
         self.danger_zones.clear()
@@ -1488,6 +1496,8 @@ class GameProcess:
             return
         powerup.alive = False
         kind = powerup.kind
+        if self.mode == "meme":
+            self.audio.play_meme_shout()
         color = powerup.color
         message = ""
         self.effects.pickup(powerup.posX, powerup.posY, color)

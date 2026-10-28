@@ -22,6 +22,9 @@ ASSET_SOUNDS = {
     "shot_alt": "Shot1.mp3",
     "crash": "Crash.mp3",
     "gameover": "GameOver.mp3",
+    "meme_chinese_shout_1": "meme_chinese_shout_1.wav",
+    "meme_chinese_shout_2": "meme_chinese_shout_2.wav",
+    "meme_chinese_shout_3": "meme_chinese_shout_3.wav",
 }
 
 
@@ -67,7 +70,7 @@ class AudioManager:
             if pygame.mixer.get_init():
                 self.enabled = True
                 pygame.mixer.set_num_channels(24)
-                pygame.mixer.set_reserved(1)
+                pygame.mixer.set_reserved(2)
                 self.meme_loop_channel = pygame.mixer.Channel(0)
                 self.coffin_channel = pygame.mixer.Channel(1)
                 # pygame-ce 2.5.x has no pygame.MUSIC_END constant, so use a
@@ -114,6 +117,14 @@ class AudioManager:
             channel.play(sound)
         except pygame.error:
             pass
+
+    def play_meme_shout(self, volume=0.65):
+        available = [name for name in (
+            "meme_chinese_shout_1", "meme_chinese_shout_2",
+            "meme_chinese_shout_3",
+        ) if self.sounds.get(name) is not None]
+        if available:
+            self.play(random.choice(available), volume, throttle_ms=100)
 
     def play_tiger_ultimate(self):
         """Play the supplied Tiger audio exactly once per activation, if valid."""
@@ -383,13 +394,13 @@ class AudioManager:
             except pygame.error:
                 pass
         if self.settings.muted:
-            for index in range(1, pygame.mixer.get_num_channels()):
+            for index in range(2, pygame.mixer.get_num_channels()):
                 try:
                     pygame.mixer.Channel(index).set_volume(0.0)
                 except pygame.error:
                     break
         else:
-            for index in range(1, pygame.mixer.get_num_channels()):
+            for index in range(2, pygame.mixer.get_num_channels()):
                 try:
                     pygame.mixer.Channel(index).set_volume(self.settings.sfx_volume)
                 except pygame.error:

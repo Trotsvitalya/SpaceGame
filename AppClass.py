@@ -251,6 +251,12 @@ class App:
                             pass
                         self._compute_viewport()
                     continue
+                if event.type in {
+                    getattr(pygame, "WINDOWSIZECHANGED", -1),
+                    getattr(pygame, "WINDOWDISPLAYCHANGED", -2),
+                }:
+                    self._compute_viewport()
+                    continue
                 if event.type == MUSIC_END_EVENT:
                     self.audio.on_music_end()
                     continue
@@ -281,13 +287,17 @@ class App:
         window = pygame.display.get_surface()
         if window is None:
             return
+        # Fullscreen mode changes can arrive without VIDEORESIZE on Windows.
+        # Re-read the actual output surface before every final nearest-neighbor
+        # scale so the image is never stretched through a stale viewport.
+        self._compute_viewport()
         window.fill((0, 0, 0))
         offset_x, offset_y, view_w, view_h = self.viewport
         if view_w == VW and view_h == VH:
             window.blit(self.canvas, (offset_x, offset_y))
         else:
-            # Keep text and UI edges crisp when a resizable window uses a
-            # non-native canvas size. Smooth scaling softened every glyph.
+            # Nearest-neighbor scaling keeps text, sprites and fullscreen video
+            # edges sharp at fractional desktop scale factors as well.
             scaled = pygame.transform.scale(self.canvas, (view_w, view_h))
             window.blit(scaled, (offset_x, offset_y))
         pygame.display.flip()
