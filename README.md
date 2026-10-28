@@ -56,7 +56,7 @@ accessibility options and a polished Ukrainian/English interface.
   window size; delta-time movement; cached assets; bounded projectile, enemy and
   particle lists; safe handling of missing/corrupt settings, scores, fonts,
   images, music and audio devices.
-- **Tests** — 93 automated headless tests covering storage, assets, audio
+- **Tests** — 94 automated headless tests covering storage, assets, audio
   fallbacks, physics, collisions, power-ups, hazards, bosses, upgrades, menus,
   accessibility and display scaling.
 
@@ -116,6 +116,7 @@ on a 1280×720 virtual canvas, so gameplay does not depend on the monitor size.
 | Restart (pause or game over) | `R` or `Enter` |
 | Main menu (pause or game over) | `M` or `Esc` |
 | Fullscreen | `F11` |
+| Hangar (menus) | `H` |
 | Select upgrade | `1`–`3`, arrow keys + `Enter`, or click |
 | Skip upgrade | `Esc` |
 | Menu navigation | Arrow keys / `WASD`, `Tab`, `Enter`, `Esc` |
@@ -330,7 +331,7 @@ so they never open a window, play sound or touch your real save files.
 python -m unittest discover -s tests -v
 ```
 
-Expected result: `Ran 93 tests ... OK`.
+Expected result: `Ran 94 tests ... OK`.
 
 A quick syntax check of every module:
 
@@ -362,11 +363,11 @@ The suite covers:
 
 The game runs on a fixed 1280×720 canvas and caches loaded art, scaled surfaces
 and fonts. The automated harness renders several thousand headless frames at
-roughly 250–400 FPS with dummy SDL drivers; a longer soak that exercised waves
-1–5, bosses, upgrades and deaths averaged about 167 FPS while drawing every
-frame. On real hardware the frame limiter targets 60 FPS. Low graphics quality
-reduces particle budgets, parallax layers and backdrop detail for weaker
-machines.
+roughly 150–260 FPS with dummy SDL drivers; a longer 15,000-frame soak that
+exercised waves 1–5, bosses, upgrades and deaths averaged about 161 FPS while
+drawing every frame. On real hardware the frame limiter targets 60 FPS. Low
+graphics quality reduces particle budgets, parallax layers and backdrop detail
+for weaker machines.
 
 ## Troubleshooting
 

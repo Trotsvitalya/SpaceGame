@@ -295,6 +295,11 @@ class Menu:
         if event.type == pygame.KEYDOWN and event.key == pygame.K_F11:
             self.app.toggle_fullscreen()
             return
+        if (event.type == pygame.KEYDOWN and event.key == pygame.K_h
+                and self.screen != "hangar"):
+            self._click_sound()
+            self._set_screen("hangar")
+            return
 
         if self.screen == "mode":
             self._handle_mode_event(event, mouse)

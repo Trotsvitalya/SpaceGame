@@ -606,6 +606,16 @@ class MenuTests(GameTestCase):
         menu.handle_event(pygame.event.Event(pygame.KEYDOWN, key=pygame.K_RETURN))
         self.assertEqual(menu.screen, "mode")
 
+    def test_hangar_hotkey_opens_from_main_and_mode(self):
+        menu = Menu(self.app)
+        menu.handle_event(pygame.event.Event(pygame.KEYDOWN, key=pygame.K_h))
+        self.assertEqual(menu.screen, "hangar")
+        menu.handle_event(pygame.event.Event(pygame.KEYDOWN, key=pygame.K_ESCAPE))
+        self.assertEqual(menu.screen, "main")
+        menu._set_screen("mode")
+        menu.handle_event(pygame.event.Event(pygame.KEYDOWN, key=pygame.K_h))
+        self.assertEqual(menu.screen, "hangar")
+
     def test_mode_select_keyboard_and_mouse(self):
         menu = Menu(self.app)
         menu._set_screen("mode")

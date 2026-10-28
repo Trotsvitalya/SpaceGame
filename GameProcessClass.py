@@ -534,7 +534,9 @@ class GameProcess:
         self.boss = BossEnemy(self.mode, self.resources, self.wave,
                               kind=boss_kind_for_wave(self.wave))
         self.boss_drop_flags = {0.66: False, 0.33: False}
-        self._announce(tr(self.language, "boss_warning"), self.palette["danger"], 3.6,
+        warning_key = ("boss_warning_sentinel" if self.boss.kind == "sentinel"
+                       else "boss_warning")
+        self._announce(tr(self.language, warning_key), self.palette["danger"], 3.6,
                        sub=tr(self.language, self.boss.name_key))
         self.audio.play("boss_warn", 0.8)
         self.audio.play("wave", 0.5)
