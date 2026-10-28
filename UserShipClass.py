@@ -1,41 +1,70 @@
-"""The player's ship.
+"""The player's ship and its weapon classes.
 
-Movement is velocity based (pixels per second) so the handling is identical at
-any frame rate.  The class also owns weapon/shield timers and the short
-respawn sequence.
+Movement is velocity based (pixels per second) so handling is identical at any
+frame rate.  Ships share one class but read their hull, engine and weapon
+numbers from :mod:`GameData`, which keeps the archetypes genuinely different
+without duplicating logic.
 """
 
 from __future__ import annotations
 
 import math
+from typing import NamedTuple
 
 import pygame
 
+from GameData import SHIPS, WEAPONS
 from utils import clamp
 
 
+class Shot(NamedTuple):
+    """A single projectile request produced by :meth:`UserShip.fire_volley`."""
+
+    x: float
+    y: float
+    vx: float
+    vy: float
+    kind: str = "pulse"
+    speed: float = 940.0
+    damage: float = 1.0
+    radius: float = 8.0
+    pierce: int = 0
+    splash: float = 0.0
+
+
 class UserShip:
+    MAX_WEAPON_LEVEL = 3
+    BASE_FIRE_INTERVAL = 0.17
     MAX_SPEED = 390.0
     ACCELERATION = 3200.0
     FRICTION = 3800.0
-    BASE_FIRE_INTERVAL = 0.17
-    MAX_WEAPON_LEVEL = 3
 
     def __init__(self, posX, posY, maxW, maxH, imageList=None,
-                 imageBoomList=None, height=78, width=78):
-        self.posX = float(posX)
-        self.posY = float(posY)
+                 imageBoomList=None, height=78, width=78, kind=None):
+        self.kind = kind if kind in SHIPS else "fighter"
+        stats = SHIPS[self.kind]
         self.maxW = maxW
         self.maxH = maxH
         self.width = width
         self.height = height
-        self.speed = self.MAX_SPEED
+        self.posX = float(posX)
+        self.posY = float(posY)
         self.vx = 0.0
         self.vy = 0.0
         self.currentDirection = 0
+        self.speed = stats["speed"]
+        self.acceleration = stats["acceleration"]
+        self.base_speed = stats["speed"]
+        self.base_acceleration = stats["acceleration"]
 
-        self.life = 3
-        self.max_life = 5
+        self.max_life = stats["max_life"]
+        self.life = stats["life"]
+        self.weapon_class = stats["weapon"]
+        self.weapon = WEAPONS[self.weapon_class]
+        self.passive = stats["passive"]
+        self.accent = stats["accent"]
+        self.hit_radius = stats["hit_radius"]
+
         self.isBoom = False
         self.alive = True
         self.respawn_timer = 0.0
@@ -45,9 +74,19 @@ class UserShip:
         self.weapon_timer = 0.0
         self.rapid_timer = 0.0
         self.fire_cooldown = 0.0
-        self.hit_radius = 19.0
+        self.damage_flash = 0.0
         self.animation_time = 0.0
         self.bank = 0.0
+        self.magnet_radius = 185.0 if self.passive == "salvager" else 0.0
+
+        self.upgrades = {}
+        self.extra_shots = 0
+        self.fire_rate_mult = 1.0
+        self.damage_bonus = 0.0
+        self.salvage_mult = 1.25 if self.passive == "salvager" else 1.0
+        self.speed_mult = 1.0
+        self.start_shield_bonus = 4.0 if self.passive == "armored" else 0.0
+        self._bank_cache = {}
 
         self.imageList = imageList or []
         self.imageBoomList = imageBoomList or []
@@ -72,7 +111,22 @@ class UserShip:
 
     @property
     def fire_interval(self):
-        return self.BASE_FIRE_INTERVAL * (0.45 if self.rapid_timer > 0 else 1.0)
+        interval = self.weapon.get("interval", SHIPS[self.kind]["fire_interval"])
+        interval *= self.fire_rate_mult
+        if self.rapid_timer > 0:
+            interval *= 0.45
+        return max(0.045, interval)
+
+    @property
+    def start_shield(self):
+        return 4.0 + self.start_shield_bonus
+
+    @property
+    def max_hp_visual(self):
+        return max(1, self.max_life)
+
+    def upgrade_level(self, key):
+        return self.upgrades.get(key, 0)
 
     # --------------------------------------------------------------- update
     def update(self, dt, move_x=0.0, move_y=0.0):
@@ -82,9 +136,9 @@ class UserShip:
             move_x /= length
             move_y /= length
 
-        target_vx = move_x * self.MAX_SPEED
-        target_vy = move_y * self.MAX_SPEED
-        acceleration = self.ACCELERATION if length > 0 else self.FRICTION
+        target_vx = move_x * self.speed
+        target_vy = move_y * self.speed
+        acceleration = self.acceleration if length > 0 else self.FRICTION
         if self.vx < target_vx:
             self.vx = min(self.vx + acceleration * dt, target_vx)
         else:
@@ -99,9 +153,8 @@ class UserShip:
             self.posY += self.vy * dt
             left_bound = 14
             right_bound = self.maxW - self.width - 14
-            # Keep the ship clear of the top and bottom HUD panels.
             top_bound = 82
-            bottom_bound = self.maxH - self.height - 82
+            bottom_bound = self.maxH - self.height - 100
             if self.posX < left_bound:
                 self.posX = left_bound
                 self.vx = 0
@@ -119,6 +172,7 @@ class UserShip:
 
         self.fire_cooldown = max(0.0, self.fire_cooldown - dt)
         self.invulnerable_timer = max(0.0, self.invulnerable_timer - dt)
+        self.damage_flash = max(0.0, self.damage_flash - dt)
 
         if self.shield_timer > 0:
             self.shield_timer = max(0.0, self.shield_timer - dt)
@@ -135,7 +189,6 @@ class UserShip:
                     self.weapon_level = 1
                     events.append("weapon_expired")
         elif self.weapon_level > 1:
-            # Defensive fix for hand-edited state or a missed timer.
             self.weapon_level = 1
 
         if not self.alive and self.life > 0:
@@ -154,7 +207,7 @@ class UserShip:
         elif move_y > 0:
             self.currentDirection = -2
 
-        self.bank = clamp(-self.vx / self.MAX_SPEED, -1.0, 1.0) * 11.0
+        self.bank = clamp(-self.vx / max(1.0, self.speed), -1.0, 1.0) * 11.0
         self._update_image(dt)
         return events
 
@@ -162,7 +215,7 @@ class UserShip:
         if not self.imageList:
             return
         self.animation_time += dt
-        frame_time = 0.085 if (abs(self.vx) + abs(self.vy) > 20) else 0.13
+        frame_time = 0.075 if (abs(self.vx) + abs(self.vy) > 20) else 0.13
         if self.animation_time >= frame_time:
             self.animation_time = 0.0
             self.imageNum = (self.imageNum + 1) % len(self.imageList)
@@ -173,15 +226,16 @@ class UserShip:
         self.alive = True
         self.isBoom = False
         self.posX = self.maxW * 0.5 - self.width * 0.5
-        self.posY = self.maxH - self.height - 82
+        self.posY = self.maxH - self.height - 100
         self.vx = self.vy = 0.0
-        self.invulnerable_timer = 2.4
+        self.invulnerable_timer = 2.4 + (0.8 if self.passive == "agile" else 0.0)
         self.respawn_timer = 0.0
 
     def take_hit(self):
         """Returns 'shield', 'dead', or 'none' (ignored while invulnerable)."""
         if not self.alive or self.invulnerable_timer > 0:
             return "none"
+        self.damage_flash = 0.22
         if self.shield_timer > 0:
             self.shield_timer = 0.0
             self.invulnerable_timer = 0.9
@@ -200,22 +254,36 @@ class UserShip:
         return self.alive and self.fire_cooldown <= 0 and self.invulnerable_timer < 99
 
     def fire_volley(self):
-        """Consume the cooldown and return (offset_x, offset_y, vx, vy) shots."""
+        """Consume the cooldown and return :class:`Shot` tuples."""
         if not self.can_fire():
             return []
         self.fire_cooldown = self.fire_interval
         y = self.posY + 4
         cx = self.centerx
         level = max(1, min(self.MAX_WEAPON_LEVEL, self.weapon_level))
-        if level == 1:
-            return [(cx, y, 0.0, -920.0)]
-        if level == 2:
-            return [(cx - 12, y + 8, -25.0, -930.0), (cx + 12, y + 8, 25.0, -930.0)]
-        return [
-            (cx, y - 4, 0.0, -960.0),
-            (cx - 19, y + 10, -105.0, -920.0),
-            (cx + 19, y + 10, 105.0, -920.0),
-        ]
+        patterns = self.weapon["pattern"]
+        entries = patterns.get(level, patterns[1])
+        shots = []
+        for dx, dy, vx, vy, damage_scale, radius, pierce, splash in entries:
+            shots.append(Shot(
+                cx + dx, y + dy, float(vx), float(vy),
+                self.weapon_class, float(-vy or 940.0),
+                damage_scale + self.damage_bonus, float(radius), int(pierce),
+                float(splash),
+            ))
+        # Multishot upgrades add one angled pair per level, capped so the
+        # screen does not turn into a solid wall of projectiles.
+        for index in range(min(2, self.extra_shots)):
+            offset = 10 + index * 7
+            shots.append(Shot(
+                cx - offset, y + 6, -55.0 - index * 20, -900.0,
+                self.weapon_class, 900.0, 0.65 + self.damage_bonus, 6.0, 0, 0.0,
+            ))
+            shots.append(Shot(
+                cx + offset, y + 6, 55.0 + index * 20, -900.0,
+                self.weapon_class, 900.0, 0.65 + self.damage_bonus, 6.0, 0, 0.0,
+            ))
+        return shots
 
     def add_weapon(self):
         if self.weapon_level < self.MAX_WEAPON_LEVEL:
@@ -237,7 +305,53 @@ class UserShip:
             return True
         return False
 
+    # ----------------------------------------------------------- upgrades
+    def apply_upgrade(self, key):
+        from GameData import UPGRADES
+
+        spec = UPGRADES.get(key)
+        if spec is None:
+            return False
+        level = self.upgrades.get(key, 0)
+        if level >= spec["max"]:
+            return False
+        self.upgrades[key] = level + 1
+        if key == "damage":
+            self.damage_bonus += 0.75
+        elif key == "firerate":
+            self.fire_rate_mult *= 0.88
+        elif key == "hull":
+            self.max_life += 1
+            self.life = min(self.max_life, self.life + 1)
+        elif key == "multishot":
+            self.extra_shots += 1
+        elif key == "engine":
+            self.speed_mult *= 1.09
+            self.speed = self.base_speed * self.speed_mult
+            self.acceleration = self.base_acceleration * (1.0 + 0.05 * (level + 1))
+        elif key == "salvage":
+            self.salvage_mult += 0.2
+            self.magnet_radius += 18.0
+        elif key == "shield":
+            self.start_shield_bonus += 6.0
+            self.add_shield(6.0)
+        return True
+
     # ---------------------------------------------------------------- draw
+    def _banked(self, image, angle):
+        rounded = int(round(angle / 3.0)) * 3
+        if rounded == 0:
+            return image
+        key = (id(image), rounded)
+        cached = self._bank_cache.get(key)
+        if cached is not None:
+            return cached
+        result = pygame.transform.rotozoom(image, -rounded, 1.0)
+        if len(self._bank_cache) > 48:
+            self._bank_cache.clear()
+        self._bank_cache[key] = result
+        return result
+
     def draw(self, surface, resources, time, mode="normal"):
         if not self.alive or self.image is None:
             return
@@ -246,35 +360,48 @@ class UserShip:
                 return
         center = (int(self.centerx), int(self.centery))
 
-        # Engine flame (procedural, flickering).
-        flame_length = 19 + math.sin(time * 31.0) * 5 + abs(self.vy) * 0.025
+        # Engine flame behind the hull.  The generated sprites already contain
+        # hot nozzles, so the procedural plume only needs to sell movement.
+        base_y = self.posY + self.height - 12
+        flame_length = 17 + math.sin(time * 31.0) * 4 + max(0.0, -self.vy) * 0.035
         flame_color = (255, 156, 62) if mode == "normal" else (255, 110, 210)
         flame_inner = (255, 246, 190) if mode == "normal" else (255, 245, 120)
-        base_y = self.posY + self.height - 8
+        if self.passive == "salvager":
+            flame_color = (96, 255, 196)
+        elif self.passive == "agile":
+            flame_color = (255, 118, 214)
         flicker = math.sin(time * 47.0) * 3
-        pygame.draw.polygon(surface, flame_color, [
-            (center[0] - 11, base_y),
-            (center[0] + 11, base_y),
-            (center[0] + flicker, base_y + flame_length),
-        ])
-        pygame.draw.polygon(surface, flame_inner, [
-            (center[0] - 5, base_y),
-            (center[0] + 5, base_y),
-            (center[0] + flicker * 0.5, base_y + flame_length * 0.55),
-        ])
+        offsets = (-14, 14) if self.kind != "tank" else (-24, -8, 8, 24)
+        width = 7 if self.kind != "tank" else 5
+        for offset in offsets:
+            pygame.draw.polygon(surface, flame_color, [
+                (center[0] + offset - width, base_y),
+                (center[0] + offset + width, base_y),
+                (center[0] + offset + flicker, base_y + flame_length),
+            ])
+            pygame.draw.polygon(surface, flame_inner, [
+                (center[0] + offset - width * 0.45, base_y),
+                (center[0] + offset + width * 0.45, base_y),
+                (center[0] + offset + flicker * 0.5, base_y + flame_length * 0.55),
+            ])
 
-        image = self.image
-        if abs(self.bank) > 0.4:
-            image = pygame.transform.rotozoom(image, self.bank, 1.0)
+        image = self._banked(self.image, self.bank)
         rect = image.get_rect(center=center)
         if self.invulnerable_timer > 0:
             image.set_alpha(150)
-        surface.blit(image, rect)
+        if self.damage_flash > 0:
+            # A short additive flash makes the hit readable without hiding the
+            # rest of the battlefield.
+            flash = image.copy()
+            flash.fill((120, 90, 70, 0), special_flags=pygame.BLEND_RGBA_ADD)
+            surface.blit(flash, rect)
+        else:
+            surface.blit(image, rect)
         image.set_alpha(255)
 
         if self.shield_timer > 0:
             pulse = 0.78 + math.sin(time * 7.0) * 0.12
-            radius = int(44 * pulse)
+            radius = int(46 * pulse)
             glow_color = (80, 200, 255) if mode == "normal" else (255, 130, 220)
             glow = resources.glow(radius, glow_color, 100)
             surface.blit(glow, glow.get_rect(center=center))

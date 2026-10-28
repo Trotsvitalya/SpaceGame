@@ -1,4 +1,8 @@
-"""Collectible power-ups."""
+"""Collectible power-ups.
+
+Power-ups drift downwards, bob gently and can be pulled toward a ship with a
+salvage magnet (the Engineer passive and the salvage upgrade).
+"""
 
 from __future__ import annotations
 
@@ -29,8 +33,10 @@ class PowerUp:
         self.resources = resources
         self.radius = 17.0
         self.speed = 92.0
+        self.vx = 0.0
         self.time = random.uniform(0, math.tau)
         self.alive = True
+        self.attracted = False
         self.sprite = resources.powerup_sprite(self.kind, mode) if resources else None
         self.color = self.COLORS[self.kind]
         self.label = {
@@ -45,8 +51,23 @@ class PowerUp:
     def random_kind(cls):
         return random.choices(cls.KINDS, weights=cls.WEIGHTS, k=1)[0]
 
-    def update(self, dt):
+    def update(self, dt, player=None):
         self.time += dt
+        self.attracted = False
+        if player is not None and player.alive:
+            magnet = float(getattr(player, "magnet_radius", 0.0))
+            if magnet > 0:
+                dx = player.centerx - self.posX
+                dy = player.centery - self.posY
+                distance = math.hypot(dx, dy)
+                if distance < magnet and distance > 1.0:
+                    self.attracted = True
+                    pull = 360.0 + (magnet - distance) / magnet * 560.0
+                    self.vx = dx / distance * pull
+                    self.posX += self.vx * dt
+                    self.posY += dy / distance * pull * dt
+                    return
+        self.vx *= 0.9
         self.posY += self.speed * dt
         self.posX += math.sin(self.time * 2.1) * 28 * dt
         if self.posY > VH + 50:
@@ -54,17 +75,19 @@ class PowerUp:
 
     def draw(self, surface, resources=None):
         resources = resources or self.resources
-        bob = math.sin(self.time * 3.0) * 4
+        bob = 0.0 if self.attracted else math.sin(self.time * 3.0) * 4
         center = (int(self.posX), int(self.posY + bob))
         if resources:
-            glow = resources.glow(30, self.color, 80)
+            glow = resources.glow(34 if self.attracted else 30, self.color,
+                                  110 if self.attracted else 80)
             surface.blit(glow, glow.get_rect(center=center))
         if self.sprite:
-            image = pygame.transform.rotozoom(self.sprite, math.sin(self.time * 2.0) * 8, 1.0)
+            angle = math.sin(self.time * 2.0) * 8
+            image = pygame.transform.rotozoom(self.sprite, angle, 1.0)
             surface.blit(image, image.get_rect(center=center))
         else:
             pygame.draw.circle(surface, self.color, center, 16, 2)
             pygame.draw.circle(surface, self.color, center, 5)
-        if resources:
-            label = resources.text(self.label, 13, (12, 18, 32))
-            surface.blit(label, label.get_rect(center=center))
+            if resources:
+                label = resources.text(self.label, 13, (12, 18, 32))
+                surface.blit(label, label.get_rect(center=center))

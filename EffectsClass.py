@@ -166,7 +166,7 @@ class Effects:
 
     MAX_PARTICLES = 700
 
-    def __init__(self, resources):
+    def __init__(self, resources, quality=None):
         self.resources = resources
         self.particles = []
         self.texts = []
@@ -174,6 +174,15 @@ class Effects:
         self.booms = []
         self.flash_alpha = 0.0
         self.flash_color = (255, 255, 255)
+        self._flash_surface = pygame.Surface((VW, VH), pygame.SRCALPHA)
+        if quality is None:
+            quality = getattr(getattr(resources, "settings", None), "effects_quality", 2)
+        self.set_quality(quality)
+
+    def set_quality(self, quality):
+        self.quality = max(0, min(2, int(quality)))
+        self.max_particles = (220, 420, self.MAX_PARTICLES)[self.quality]
+        self.limit = (0.55, 0.78, 1.0)[self.quality]
 
     def clear(self):
         self.particles.clear()
@@ -183,13 +192,14 @@ class Effects:
         self.flash_alpha = 0.0
 
     def _add(self, particle):
-        if len(self.particles) >= self.MAX_PARTICLES:
-            del self.particles[:80]
+        if len(self.particles) >= self.max_particles:
+            del self.particles[:max(20, self.max_particles // 8)]
         self.particles.append(particle)
 
     def explosion(self, x, y, color=(255, 170, 90), count=26, speed=260, size=3.5,
                   life=0.7, smoke=True):
         rng = random
+        count = max(6, int(count * self.limit))
         for _ in range(count):
             angle = rng.uniform(0, math.tau)
             velocity = rng.uniform(speed * 0.25, speed)
@@ -201,10 +211,10 @@ class Effects:
                 rng.uniform(size * 0.5, size * 1.5),
                 color,
                 drag=0.93,
-                shape="circle" if rng.random() < 0.7 else "spark",
+                shape="circle" if rng.random() < 0.62 else "spark",
             ))
         if smoke:
-            for _ in range(max(3, count // 5)):
+            for _ in range(max(2, int(count // 6))):
                 angle = rng.uniform(0, math.tau)
                 self._add(Particle(
                     x, y,
@@ -217,10 +227,10 @@ class Effects:
                 ))
         self.ring(x, y, color, max_radius=70, life=0.35, width=3)
 
-    def hit_sparks(self, x, y, color=(255, 225, 140), count=7):
-        for _ in range(count):
+    def hit_sparks(self, x, y, color=(255, 225, 140), count=7, spread=1.0):
+        for _ in range(max(2, int(count * self.limit))):
             angle = random.uniform(0, math.tau)
-            velocity = random.uniform(60, 240)
+            velocity = random.uniform(60, 240) * spread
             self._add(Particle(
                 x, y,
                 math.cos(angle) * velocity,
@@ -232,8 +242,41 @@ class Effects:
                 shape="spark",
             ))
 
+    def muzzle(self, x, y, color=(160, 230, 255), angle=0.0, intensity=1.0):
+        """Small directional flash; never covers a large part of the screen."""
+        for _ in range(max(2, int(5 * self.limit))):
+            spread = random.uniform(-0.35, 0.35)
+            velocity = random.uniform(110, 270) * intensity
+            self._add(Particle(
+                x, y,
+                math.cos(angle + spread) * velocity,
+                math.sin(angle + spread) * velocity,
+                random.uniform(0.08, 0.20),
+                random.uniform(1.2, 2.8),
+                color,
+                drag=0.88,
+                shape="spark",
+            ))
+        self.ring(x, y, color, max_radius=24, life=0.14, width=2)
+
+    def debris(self, x, y, color=(255, 170, 90), count=12, speed=180):
+        for _ in range(max(3, int(count * self.limit))):
+            angle = random.uniform(0, math.tau)
+            velocity = random.uniform(speed * 0.2, speed)
+            self._add(Particle(
+                x, y,
+                math.cos(angle) * velocity,
+                math.sin(angle) * velocity,
+                random.uniform(0.4, 0.9),
+                random.uniform(2.0, 4.5),
+                color,
+                gravity=110,
+                drag=0.985,
+                shape="debris",
+            ))
+
     def engine(self, x, y, color=(90, 190, 255), intensity=1.0):
-        for _ in range(2):
+        for _ in range(2 if self.quality >= 2 else 1):
             self._add(Particle(
                 x + random.uniform(-4, 4),
                 y + random.uniform(-2, 2),
@@ -259,7 +302,7 @@ class Effects:
         ))
 
     def pickup(self, x, y, color=(120, 255, 200)):
-        for _ in range(18):
+        for _ in range(max(8, int(18 * self.limit))):
             angle = random.uniform(0, math.tau)
             velocity = random.uniform(40, 190)
             self._add(Particle(
@@ -274,7 +317,7 @@ class Effects:
         self.ring(x, y, color, max_radius=64, life=0.5, width=2)
 
     def shield_hit(self, x, y, color=(90, 200, 255)):
-        for _ in range(26):
+        for _ in range(max(8, int(26 * self.limit))):
             angle = random.uniform(0, math.tau)
             velocity = random.uniform(80, 220)
             self._add(Particle(
@@ -287,10 +330,11 @@ class Effects:
                 drag=0.91,
             ))
         self.ring(x, y, color, max_radius=96, life=0.45, width=4)
-        self.flash((120, 210, 255), 75)
+        self.flash((120, 210, 255), 52)
 
     def boss_explosion(self, x, y, color=(255, 160, 80)):
-        for _ in range(5):
+        bursts = 5 if self.quality >= 1 else 3
+        for _ in range(bursts):
             self.explosion(
                 x + random.uniform(-55, 55),
                 y + random.uniform(-40, 40),
@@ -301,7 +345,8 @@ class Effects:
                 life=1.1,
             )
         self.ring(x, y, (255, 230, 160), max_radius=210, life=0.8, width=6)
-        self.flash((255, 220, 180), 120)
+        self.flash((255, 220, 180), 88)
+
 
     def text(self, text, x, y, color, size=18, life=1.1, vy=-48):
         self.texts.append(FloatingText(str(text), x, y, color, size, life, vy))
@@ -377,6 +422,11 @@ class Effects:
                 dy = particle.vy * 0.025
                 pygame.draw.line(surface, color, (x, y), (int(x - dx), int(y - dy)),
                                  max(1, int(particle.size)))
+            elif particle.shape == "debris":
+                size = max(1, int(particle.size))
+                pygame.draw.polygon(surface, color, [
+                    (x, y - size), (x + size, y), (x, y + size), (x - size, y),
+                ])
             else:
                 pygame.draw.circle(surface, color, (x, y), max(1, int(particle.size)))
 
@@ -402,6 +452,5 @@ class Effects:
     def draw_flash(self, surface):
         if self.flash_alpha <= 1:
             return
-        overlay = pygame.Surface((VW, VH), pygame.SRCALPHA)
-        overlay.fill((*self.flash_color, int(self.flash_alpha)))
-        surface.blit(overlay, (0, 0))
+        self._flash_surface.fill((*self.flash_color, int(self.flash_alpha)))
+        surface.blit(self._flash_surface, (0, 0))

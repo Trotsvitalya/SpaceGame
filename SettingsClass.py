@@ -12,11 +12,21 @@ import os
 
 from utils import clamp, config_dir, read_json, write_json
 
-SETTINGS_PATH = os.path.join(config_dir(), "settings.json")
-SCORES_PATH = os.path.join(config_dir(), "scores.json")
+
+def _settings_path():
+    """Resolve at call time so SPACEGAME_CONFIG_DIR can be set late (tests)."""
+    return os.path.join(config_dir(), "settings.json")
+
+
+def _scores_path():
+    return os.path.join(config_dir(), "scores.json")
+
+
+SETTINGS_PATH = _settings_path()
+SCORES_PATH = _scores_path()
 
 DEFAULT_SETTINGS = {
-    "version": 2,
+    "version": 3,
     "music_volume": 0.55,
     "sfx_volume": 0.7,
     "muted": False,
@@ -25,6 +35,8 @@ DEFAULT_SETTINGS = {
     "mode": "normal",
     "screen_shake": True,
     "show_fps": False,
+    "ship": "fighter",
+    "effects_quality": 2,
 }
 
 
@@ -49,12 +61,26 @@ def _as_mode(value, default="normal"):
     return value if value in ("normal", "meme") else default
 
 
+def _as_ship(value, default="fighter"):
+    from GameData import SHIP_ORDER
+    return value if value in SHIP_ORDER else default
+
+
+def _as_quality(value, default=2):
+    if isinstance(value, bool):
+        return default
+    try:
+        return max(0, min(2, int(value)))
+    except (TypeError, ValueError):
+        return default
+
+
 class Settings:
     """Mutable settings object with crash-proof loading/saving."""
 
     def __init__(self, data=None):
         data = data if isinstance(data, dict) else {}
-        self.version = 2
+        self.version = 3
         self.music_volume = _as_float(data.get("music_volume"), DEFAULT_SETTINGS["music_volume"])
         self.sfx_volume = _as_float(data.get("sfx_volume"), DEFAULT_SETTINGS["sfx_volume"])
         self.muted = _as_bool(data.get("muted"), DEFAULT_SETTINGS["muted"])
@@ -63,10 +89,14 @@ class Settings:
         self.mode = _as_mode(data.get("mode"))
         self.screen_shake = _as_bool(data.get("screen_shake"), DEFAULT_SETTINGS["screen_shake"])
         self.show_fps = _as_bool(data.get("show_fps"), DEFAULT_SETTINGS["show_fps"])
+        self.ship = _as_ship(data.get("ship"), DEFAULT_SETTINGS["ship"])
+        self.effects_quality = _as_quality(
+            data.get("effects_quality"), DEFAULT_SETTINGS["effects_quality"]
+        )
 
     @classmethod
     def load(cls, path=None):
-        path = path or SETTINGS_PATH
+        path = path or _settings_path()
         raw = read_json(path, {})
         settings = cls(raw)
         if not raw:
@@ -85,10 +115,12 @@ class Settings:
             "mode": self.mode,
             "screen_shake": self.screen_shake,
             "show_fps": self.show_fps,
+            "ship": self.ship,
+            "effects_quality": self.effects_quality,
         }
 
     def save(self, path=None):
-        return write_json(path or SETTINGS_PATH, self.as_dict())
+        return write_json(path or _settings_path(), self.as_dict())
 
     def copy(self):
         return Settings(copy.deepcopy(self.as_dict()))
@@ -111,7 +143,7 @@ class Leaderboard:
     """Top ten scores for each game mode."""
 
     def __init__(self, data=None, path=None):
-        self.path = path or SCORES_PATH
+        self.path = path or _scores_path()
         data = data if isinstance(data, dict) else {}
         # Tolerate the old flat format by moving it into the normal board.
         if "scores" in data and "normal" not in data:
@@ -150,7 +182,7 @@ class Leaderboard:
 
     @classmethod
     def load(cls, path=None):
-        path = path or SCORES_PATH
+        path = path or _scores_path()
         return cls(read_json(path, {}), path=path)
 
     def best(self, mode):

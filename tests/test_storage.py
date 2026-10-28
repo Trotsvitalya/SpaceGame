@@ -50,6 +50,38 @@ class SettingsTests(TempDirTestCase):
         self.assertFalse(loaded.screen_shake)
         self.assertTrue(loaded.show_fps)
 
+    def test_ship_and_quality_roundtrip(self):
+        settings = Settings.load(self.settings_path)
+        settings.ship = "engineer"
+        settings.effects_quality = 0
+        self.assertTrue(settings.save(self.settings_path))
+
+        loaded = Settings.load(self.settings_path)
+        self.assertEqual(loaded.ship, "engineer")
+        self.assertEqual(loaded.effects_quality, 0)
+
+    def test_old_settings_gain_new_defaults(self):
+        # Version 2 files predate the hangar and graphics options.
+        with open(self.settings_path, "w", encoding="utf-8") as handle:
+            json.dump({"version": 2, "music_volume": 0.4, "language": "en"}, handle)
+        settings = Settings.load(self.settings_path)
+        self.assertEqual(settings.ship, "fighter")
+        self.assertEqual(settings.effects_quality, 2)
+        self.assertAlmostEqual(settings.music_volume, 0.4)
+        self.assertEqual(settings.language, "en")
+
+    def test_invalid_ship_and_quality_are_sanitized(self):
+        settings = Settings({
+            "ship": "battlecruiser",
+            "effects_quality": "ultra",
+        })
+        self.assertEqual(settings.ship, "fighter")
+        self.assertEqual(settings.effects_quality, 2)
+
+        settings = Settings({"ship": "tank", "effects_quality": 9})
+        self.assertEqual(settings.ship, "tank")
+        self.assertEqual(settings.effects_quality, 2)
+
     def test_corrupt_file_falls_back_and_is_repaired(self):
         with open(self.settings_path, "w", encoding="utf-8") as handle:
             handle.write('{"music_volume": 0.2, "broken":')
@@ -57,7 +89,7 @@ class SettingsTests(TempDirTestCase):
         self.assertEqual(settings.music_volume, DEFAULT_SETTINGS["music_volume"])
         repaired = read_json(self.settings_path, None)
         self.assertIsInstance(repaired, dict)
-        self.assertEqual(repaired["version"], 2)
+        self.assertEqual(repaired["version"], 3)
 
     def test_invalid_values_are_sanitized(self):
         data = {

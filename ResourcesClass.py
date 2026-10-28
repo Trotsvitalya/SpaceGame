@@ -8,6 +8,7 @@ import random
 
 import pygame
 
+from GameData import SHIP_ORDER, ZONES
 from utils import ROOT, VH, VW
 
 IMG_ASTEROIDS = os.path.join(ROOT, "assets", "images", "asteroids")
@@ -15,8 +16,23 @@ IMG_ASTEROID_BOOM = os.path.join(ROOT, "assets", "images", "asteroidsBoom")
 IMG_BACKGROUNDS = os.path.join(ROOT, "assets", "images", "backgrounds")
 IMG_SHIPS = os.path.join(ROOT, "assets", "images", "userStarShips")
 IMG_BULLETS = os.path.join(ROOT, "assets", "images", "userBullets")
+IMG_SHIPS_HD = os.path.join(ROOT, "assets", "images", "ships")
+IMG_ENEMIES_HD = os.path.join(ROOT, "assets", "images", "enemies")
+IMG_BOSSES_HD = os.path.join(ROOT, "assets", "images", "bosses")
+IMG_PLANETS_HD = os.path.join(ROOT, "assets", "images", "planets")
+IMG_POWERUPS_HD = os.path.join(ROOT, "assets", "images", "powerups")
+IMG_BULLETS_HD = os.path.join(ROOT, "assets", "images", "bullets")
 FONT_BODY = os.path.join(ROOT, "assets", "fonts", "solid.ttf")
 FONT_TITLE = os.path.join(ROOT, "assets", "fonts", "Space Age.ttf")
+
+ENEMY_DISPLAY_SIZE = {
+    "scout": (58, 58),
+    "fighter": (72, 72),
+    "bomber": (84, 84),
+    "raider": (66, 66),
+    "elite": (96, 96),
+}
+
 
 NORMAL_PALETTE = {
     "bg": (6, 10, 24),
@@ -125,9 +141,12 @@ class Resources:
         self._boom_cache = {}
         self._enemy_cache = {}
         self._powerup_cache = {}
+        self._bullet_cache = {}
         self._background_cache = {}
         self._nebula_cache = {}
         self._planet_cache = {}
+        self._rotation_cache = {}
+        self._hud_icon_cache = {}
         self.backgrounds = []
         self.ship_frames = []
         self.ship_large = []
@@ -135,7 +154,15 @@ class Resources:
         self.bullet_frames = []
         self.asteroid_sources = []
         self.boom_sources = []
+        self.ship_sets = {}
+        self.ship_large_sets = {}
+        self.enemy_sets = {}
+        self.boss_sets = {}
+        self.planet_sources = {}
+        self.powerup_sources = {}
+        self.bullet_sprites = {}
         self._load_images()
+        self._load_generated()
         self._build_fonts()
         self.vignette = self._build_vignette()
         self.scanlines = self._build_scanlines()
@@ -191,6 +218,205 @@ class Resources:
             fallback = pygame.Surface((VW, VH)).convert()
             fallback.fill((8, 10, 24))
             self.backgrounds = [fallback]
+
+    @staticmethod
+    def _frame_files(directory, prefix=None):
+        try:
+            names = os.listdir(directory)
+        except OSError:
+            return []
+        files = [
+            name for name in names
+            if name.lower().endswith(".png")
+            and (prefix is None or name.startswith(prefix + "_"))
+        ]
+
+        def sort_key(name):
+            stem = name.rsplit(".", 1)[0]
+            tail = stem.rsplit("_", 1)[-1]
+            return (int(tail) if tail.isdigit() else 999, stem)
+
+        return [os.path.join(directory, name) for name in sorted(files, key=sort_key)]
+
+    def _load_generated(self):
+        """Load the optional high-resolution art created by tools/generate_assets.py.
+
+        Every set is optional: if a file is missing the procedural fallbacks
+        from the original game keep working.
+        """
+        for kind in SHIP_ORDER:
+            frames = []
+            for path in self._frame_files(IMG_SHIPS_HD, kind):
+                image = _safe_load_alpha(path)
+                if image is not None:
+                    frames.append(image)
+            if frames:
+                self.ship_sets[kind] = [
+                    pygame.transform.smoothscale(image, (78, 78)) for image in frames
+                ]
+                self.ship_large_sets[kind] = [
+                    pygame.transform.smoothscale(image, (250, 250)) for image in frames
+                ]
+            else:
+                self.ship_sets[kind] = list(self.ship_frames)
+                self.ship_large_sets[kind] = list(self.ship_large)
+
+        preferred = getattr(self.settings, "ship", "fighter")
+        if preferred not in self.ship_sets:
+            preferred = "fighter"
+        self.ship_frames = list(self.ship_sets[preferred])
+        self.ship_large = list(self.ship_large_sets[preferred])
+        self.ship_small = pygame.transform.smoothscale(self.ship_frames[0], (28, 28))
+
+        for kind, size in ENEMY_DISPLAY_SIZE.items():
+            frames = []
+            for path in self._frame_files(IMG_ENEMIES_HD, kind):
+                image = _safe_load_alpha(path)
+                if image is not None:
+                    frames.append(pygame.transform.smoothscale(image, size))
+            if frames:
+                self.enemy_sets[kind] = frames
+
+        for kind in ("dreadnought", "sentinel"):
+            frames = []
+            for path in self._frame_files(IMG_BOSSES_HD, kind):
+                image = _safe_load_alpha(path)
+                if image is not None:
+                    frames.append(pygame.transform.smoothscale(image, (330, 248)))
+            if frames:
+                self.boss_sets[kind] = frames
+
+        for path in self._frame_files(IMG_PLANETS_HD):
+            image = _safe_load_alpha(path)
+            if image is None:
+                continue
+            name = os.path.basename(path)
+            if name.startswith("planet_"):
+                name = name[len("planet_"):]
+            name = name.rsplit(".", 1)[0]
+            self.planet_sources[name] = image
+
+        for path in self._frame_files(IMG_POWERUPS_HD):
+            image = _safe_load_alpha(path, (44, 44))
+            if image is not None:
+                self.powerup_sources[os.path.basename(path).rsplit(".", 1)[0]] = image
+
+        bullet_sizes = {
+            "player_pulse": (18, 24),
+            "player_burst": (16, 22),
+            "player_spread": (20, 28),
+            "player_lance": (24, 54),
+            "enemy_orb": (20, 20),
+            "enemy_plasma": (20, 20),
+        }
+        for kind, size in bullet_sizes.items():
+            path = os.path.join(IMG_BULLETS_HD, kind + ".png")
+            image = _safe_load_alpha(path, size)
+            if image is not None:
+                self.bullet_sprites[kind] = image
+
+    # ------------------------------------------------------------ sprite API
+    def ship_frames_for(self, kind):
+        return self.ship_sets.get(kind) or self.ship_frames
+
+    def select_ship(self, kind):
+        """Make ``kind`` the active hull used by HUD icons and the menu hero."""
+        if kind not in self.ship_sets:
+            kind = "fighter"
+        if kind not in self.ship_sets:
+            return None
+        self.ship_frames = list(self.ship_sets[kind])
+        self.ship_large = list(self.ship_large_sets[kind])
+        self.ship_small = pygame.transform.smoothscale(self.ship_frames[0], (28, 28))
+        self.settings.ship = kind
+        return kind
+
+    def ship_large_for(self, kind):
+        return self.ship_large_sets.get(kind) or self.ship_large
+
+    def enemy_frames(self, kind):
+        frames = self.enemy_sets.get(kind)
+        if frames:
+            return frames
+        return None
+
+    def boss_frames(self, kind):
+        return self.boss_sets.get(kind)
+
+    def planet(self, name, size):
+        name = name if name in self.planet_sources else next(iter(self.planet_sources), None)
+        if name is None:
+            return None
+        size = max(48, int(size))
+        key = ("planet", name, size)
+        cached = self._planet_cache.get(key)
+        if cached is not None:
+            return cached
+        image = pygame.transform.smoothscale(self.planet_sources[name], (size, size))
+        if len(self._planet_cache) > 40:
+            self._planet_cache.clear()
+        self._planet_cache[key] = image
+        return image
+
+    def bullet_sprite(self, kind, mode="normal"):
+        key = (kind, mode)
+        cached = self._bullet_cache.get(key)
+        if cached is not None:
+            return cached
+        image = self.bullet_sprites.get(kind)
+        if image is None:
+            # Reuse the legacy bullet sheet if the new art is unavailable.
+            image = self.bullet_frames[0] if self.bullet_frames else None
+            if image is None:
+                image = pygame.Surface((16, 16), pygame.SRCALPHA)
+                pygame.draw.circle(image, (255, 220, 120), (8, 8), 6)
+        if mode == "meme" and kind.startswith("player_"):
+            image = image.copy()
+            image.fill((255, 186, 232), special_flags=pygame.BLEND_RGB_MULT)
+        self._bullet_cache[key] = image
+        return image
+
+    def asteroid_rot(self, index, radius, angle):
+        index %= len(self.asteroid_sources)
+        radius = max(10, int(radius))
+        step = int(round(angle / 8.0)) % 45
+        key = (index, radius, step)
+        cached = self._rotation_cache.get(key)
+        if cached is not None:
+            return cached
+        base = self.asteroid(index, radius)
+        image = pygame.transform.rotozoom(base, step * 8.0, 1.0)
+        if len(self._rotation_cache) > 420:
+            self._rotation_cache.clear()
+        self._rotation_cache[key] = image
+        return image
+
+    def zone_background(self, zone_index, mode):
+        zone_index %= len(ZONES)
+        key = ("zone", zone_index, mode)
+        cached = self._background_cache.get(key)
+        if cached is not None:
+            return cached
+        zone = ZONES[zone_index]
+        base_index = (zone_index + 2) % len(self.backgrounds)
+        surface = self.backgrounds[base_index].copy()
+        tint = zone["tint"] if mode == "normal" else (255, 180, 220)
+        surface.fill(tint, special_flags=pygame.BLEND_RGB_MULT)
+        overlay = self._gradient_overlay()
+        surface.blit(overlay, (0, 0))
+        self._background_cache[key] = surface
+        return surface
+
+    def _gradient_overlay(self):
+        cached = self._nebula_cache.get("__gradient")
+        if cached is not None:
+            return cached
+        overlay = pygame.Surface((VW, VH), pygame.SRCALPHA)
+        for y in range(0, VH, 8):
+            alpha = int(16 + 82 * (y / VH))
+            pygame.draw.rect(overlay, (2, 4, 12, alpha), (0, y, VW, 8))
+        self._nebula_cache["__gradient"] = overlay
+        return overlay
 
     def _build_fonts(self):
         # The bundled fonts have no real Cyrillic glyphs (they render boxes),
@@ -536,6 +762,13 @@ class Resources:
         cached = self._powerup_cache.get(key)
         if cached is not None:
             return cached
+        if kind in self.powerup_sources:
+            surface = self.powerup_sources[kind]
+            if mode == "meme":
+                surface = surface.copy()
+                surface.fill((255, 188, 235), special_flags=pygame.BLEND_RGB_MULT)
+            self._powerup_cache[key] = surface
+            return surface
         palette = palette_for(mode)
         colors = {
             "shield": (80, 190, 255),

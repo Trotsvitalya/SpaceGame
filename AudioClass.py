@@ -57,6 +57,7 @@ class AudioManager:
         self.meme_loop_channel = None
         self.meme_loop_sound = None
         self.paused = False
+        self.music_paused = False
         self.last_played = {}
         try:
             if pygame.mixer.get_init():
@@ -114,6 +115,7 @@ class AudioManager:
         return 0.0 if self.settings.muted else self.settings.music_volume
 
     def _stop_all_music(self):
+        self.music_paused = False
         try:
             pygame.mixer.music.stop()
         except pygame.error:
@@ -153,6 +155,7 @@ class AudioManager:
         self.track_index = 0
         self.single_loop = False
         self.paused = False
+        self.music_paused = False
 
         if context == "menu":
             if os.path.isfile(MUSIC_MENU):
@@ -232,13 +235,18 @@ class AudioManager:
         if not self.enabled:
             return
         self.paused = True
+        self.music_paused = False
         try:
-            pygame.mixer.music.pause()
+            if pygame.mixer.music.get_busy():
+                pygame.mixer.music.pause()
+                self.music_paused = True
         except pygame.error:
             pass
         if self.meme_loop_channel is not None:
             try:
-                self.meme_loop_channel.pause()
+                if self.meme_loop_channel.get_busy():
+                    self.meme_loop_channel.pause()
+                    self.music_paused = True
             except pygame.error:
                 pass
 
@@ -246,6 +254,9 @@ class AudioManager:
         if not self.enabled:
             return
         self.paused = False
+        if not self.music_paused:
+            return
+        self.music_paused = False
         try:
             pygame.mixer.music.unpause()
         except pygame.error:

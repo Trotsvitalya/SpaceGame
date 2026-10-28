@@ -7,15 +7,28 @@ import tempfile
 import unittest
 from unittest import mock
 
+# Keep gameplay tests off the player's real settings/leaderboard even when the
+# suite is launched with plain ``discover -s tests`` (which imports this module
+# as a top-level module and therefore skips tests/__init__.py).
+os.environ.setdefault(
+    "SPACEGAME_CONFIG_DIR",
+    tempfile.mkdtemp(prefix="spacegame-game-tests-"),
+)
+
 import pygame
 
 from AppClass import App
 from BulletClass import Bullet
 from EnemyAsteroidClass import BossEnemy, EnemyAsteroid, EnemyShip
+from GameData import (SHIPS, SHIP_ORDER, UPGRADES, WEAPONS, ZONES,
+                      boss_hp_for_wave, boss_kind_for_wave, upgrade_available,
+                      upgrade_cost, zone_for_wave)
 from GameProcessClass import GameProcess
+from Hazards import BeamAttack, DangerZone
 from MenuClass import Menu
 from PowerUpClass import PowerUp
 from SettingsClass import Leaderboard, Settings
+from SpaceBackdrop import SpaceBackdrop
 from UserShipClass import UserShip
 from utils import VH, VW
 
@@ -25,6 +38,10 @@ class GameTestCase(unittest.TestCase):
     def setUpClass(cls):
         pygame.init()
         cls.app = App(force_windowed=True)
+        # Assertions below describe the default hull; never inherit a saved
+        # hangar choice from a previous run.
+        cls.app.settings.ship = "fighter"
+        cls.app.resources.select_ship("fighter")
 
     def setUp(self):
         self._original_leaderboard = self.app.leaderboard
@@ -64,7 +81,7 @@ class PlayerTests(GameTestCase):
         for _ in range(600):
             ship.update(1.0 / 60.0, -1.0, 1.0)
         self.assertEqual(ship.posX, 14)
-        self.assertEqual(ship.posY, VH - ship.height - 82)
+        self.assertEqual(ship.posY, VH - ship.height - 100)
 
     def test_weapon_levels_and_cooldown(self):
         ship = self.make_ship()
@@ -174,6 +191,203 @@ class ProjectileAndPowerUpTests(GameTestCase):
         self.assertGreater(game.score, before)
 
 
+class WeaponAndUpgradeTests(GameTestCase):
+    def make_kind(self, kind):
+        return UserShip(100.0, 300.0, VW, VH,
+                        self.app.resources.ship_frames_for(kind), kind=kind)
+
+    def test_archetypes_map_to_weapon_classes(self):
+        expected = {"fighter": "pulse", "interceptor": "burst",
+                    "tank": "lance", "engineer": "spread"}
+        for kind, weapon in expected.items():
+            ship = self.make_kind(kind)
+            self.assertEqual(ship.weapon_class, weapon)
+            self.assertEqual(ship.life, SHIPS[kind]["life"])
+            self.assertEqual(ship.max_life, SHIPS[kind]["max_life"])
+            self.assertEqual(ship.hit_radius, SHIPS[kind]["hit_radius"])
+        engineer = self.make_kind("engineer")
+        self.assertGreater(engineer.magnet_radius, 0)
+        self.assertGreater(engineer.salvage_mult, 1.0)
+        self.assertGreater(self.make_kind("interceptor").speed,
+                           self.make_kind("tank").speed)
+
+    def test_lance_fires_piercing_shots(self):
+        ship = self.make_kind("tank")
+        ship.invulnerable_timer = 0
+        shots = ship.fire_volley()
+        self.assertTrue(shots)
+        self.assertTrue(all(shot.pierce >= 2 for shot in shots))
+        self.assertAlmostEqual(shots[0].speed, 1240.0)
+
+    def test_upgrade_costs_caps_and_effects(self):
+        ship = self.make_kind("fighter")
+        self.assertEqual(upgrade_cost("damage", 0), 8)
+        self.assertTrue(ship.apply_upgrade("damage"))
+        self.assertAlmostEqual(ship.damage_bonus, 0.75)
+        ship.invulnerable_timer = 0
+        ship.fire_cooldown = 0
+        self.assertAlmostEqual(ship.fire_volley()[0].damage, 1.75)
+        self.assertEqual(upgrade_cost("damage", 1), 16)
+
+        base_speed = ship.speed
+        base_magnet = ship.magnet_radius
+        self.assertTrue(ship.apply_upgrade("engine"))
+        self.assertGreater(ship.speed, base_speed)
+        self.assertTrue(ship.apply_upgrade("salvage"))
+        self.assertGreater(ship.magnet_radius, base_magnet)
+
+        for _ in range(UPGRADES["damage"]["max"]):
+            ship.apply_upgrade("damage")
+        self.assertFalse(upgrade_available("damage", ship.upgrades))
+        self.assertFalse(ship.apply_upgrade("damage"))
+
+    def test_hull_upgrade_grants_a_life(self):
+        ship = self.make_kind("interceptor")
+        before = (ship.life, ship.max_life)
+        self.assertTrue(ship.apply_upgrade("hull"))
+        self.assertEqual(ship.max_life, before[1] + 1)
+        self.assertEqual(ship.life, min(ship.max_life, before[0] + 1))
+
+    def test_upgrade_overlay_spends_salvage(self):
+        game = self.make_game()
+        game.salvage = 200
+        game._open_upgrade()
+        self.assertEqual(game.state, "upgrade")
+        self.assertEqual(len(game.upgrade_choices), 3)
+        key, cost = game.upgrade_choices[0]
+        before = game.salvage
+        game._apply_upgrade(0)
+        self.assertEqual(game.state, "playing")
+        self.assertEqual(game.salvage, before - cost)
+        self.assertEqual(game.player.upgrade_level(key), 1)
+
+    def test_upgrade_overlay_rejects_unaffordable_choice(self):
+        game = self.make_game()
+        game.salvage = 0
+        game._open_upgrade()
+        key, _ = game.upgrade_choices[0]
+        game._apply_upgrade(0)
+        self.assertEqual(game.state, "upgrade")
+        self.assertEqual(game.player.upgrade_level(key), 0)
+
+    def test_upgrade_overlay_can_be_skipped(self):
+        game = self.make_game()
+        game._open_upgrade()
+        game.handle_event(pygame.event.Event(pygame.KEYDOWN, key=pygame.K_ESCAPE))
+        self.assertEqual(game.state, "playing")
+        self.assertEqual(game.upgrade_choices, [])
+
+
+class HazardTests(GameTestCase):
+    def test_danger_zone_warns_then_hits(self):
+        game = self.make_game()
+        game.player.invulnerable_timer = 0
+        game.spawn_danger_zone(game.player.centerx, game.player.centery,
+                               radius=100, warn=0.2, duration=0.5)
+        game._update_collisions()
+        self.assertEqual(game.player.life, 3)
+        game._update_hazards(0.25)
+        game._update_collisions()
+        self.assertEqual(game.player.life, 2)
+        self.assertFalse(game.player.alive)
+
+    def test_beam_warns_then_hits_the_line(self):
+        game = self.make_game()
+        game.player.invulnerable_timer = 0
+        game.spawn_beam(game.player.centerx, game.player.centery - 250,
+                        math.pi / 2, warn=0.1, duration=0.4, width=20)
+        game._update_hazards(0.05)
+        game._update_collisions()
+        self.assertEqual(game.player.life, 3)
+        game._update_hazards(0.1)
+        game._update_collisions()
+        self.assertEqual(game.player.life, 2)
+
+    def test_hazards_expire(self):
+        zone = DangerZone(100, 100, warn=0.1, duration=0.1)
+        beam = BeamAttack(100, 100, 0.0, warn=0.1, duration=0.1)
+        for _ in range(30):
+            zone.update(1.0 / 60.0)
+            beam.update(1.0 / 60.0)
+        self.assertFalse(zone.alive)
+        self.assertFalse(beam.alive)
+
+
+class BossAndZoneTests(GameTestCase):
+    def test_zone_rotation(self):
+        self.assertEqual(zone_for_wave(1)["id"], "core")
+        self.assertEqual(zone_for_wave(5)["id"], "core")
+        self.assertEqual(zone_for_wave(6)["id"], "nebula")
+        self.assertEqual(zone_for_wave(11)["id"], "ember")
+
+    def test_boss_selection_and_scaling(self):
+        self.assertEqual(boss_kind_for_wave(5), "dreadnought")
+        self.assertEqual(boss_kind_for_wave(10), "sentinel")
+        self.assertGreater(boss_hp_for_wave(10), boss_hp_for_wave(5))
+
+    def test_boss_phases_spawn_minions_and_hazards(self):
+        game = self.make_game()
+        boss = BossEnemy("normal", self.app.resources, 5, kind="dreadnought")
+        boss.entered = True
+        boss.posY = boss.target_y
+        boss.hp = int(boss.max_hp * 0.6)
+        events = boss.update(1.0 / 60.0, game)
+        self.assertIn("phase2", events)
+        self.assertIn("minions", events)
+        self.assertEqual(boss.phase, 2)
+        self.assertTrue(any(enemy.kind == "scout" for enemy in game.enemies))
+
+        boss.hp = int(boss.max_hp * 0.3)
+        events = boss.update(1.0 / 60.0, game)
+        self.assertIn("phase3", events)
+        self.assertEqual(boss.phase, 3)
+
+        boss._attack_zones(game, [])
+        self.assertTrue(game.danger_zones)
+        boss._attack_beam_sweep(game, [])
+        self.assertTrue(game.beams)
+
+    def test_defeating_boss_advances_wave_and_opens_upgrade(self):
+        game = self.make_game()
+        game.wave = 10
+        game._spawn_boss()
+        boss = game.boss
+        self.assertIsNotNone(boss)
+        boss.hp = 1
+        salvage_before = game.salvage
+        game.player_bullets = [Bullet(boss.posX, boss.posY, damage=5)]
+        game._update_collisions()
+        self.assertIsNone(game.boss)
+        self.assertEqual(game.wave, 11)
+        self.assertGreater(game.salvage, salvage_before)
+        self.assertEqual(len(game.powerups), 3)
+        self.assertEqual(game.state, "upgrade")
+        self.assertEqual(zone_for_wave(11)["id"], "ember")
+        self.assertEqual(game.zone_id, "ember")
+
+
+class BackdropTests(GameTestCase):
+    def test_backdrop_layers_change_with_zone_and_quality(self):
+        backdrop = SpaceBackdrop(self.app.resources, "normal", zone=0,
+                                 seed=7, quality=1)
+        surface = pygame.Surface((VW, VH))
+        first = backdrop.background
+        backdrop.update(1.0 / 60.0, 40.0)
+        backdrop.draw(surface)
+        backdrop.set_zone(2)
+        self.assertIsNot(backdrop.background, first)
+        self.assertEqual(backdrop.zone["id"], "ember")
+        backdrop.set_quality(0)
+        self.assertEqual(backdrop.quality, 0)
+        backdrop.draw(surface)
+
+    def test_menu_uses_shared_backdrop(self):
+        menu = Menu(self.app)
+        self.assertIsInstance(menu.backdrop, SpaceBackdrop)
+        menu.update(1.0 / 60.0)
+        menu.draw(self.app.canvas)
+
+
 class CollisionTests(GameTestCase):
     def test_player_bullet_kills_enemy(self):
         game = self.make_game()
@@ -186,6 +400,32 @@ class CollisionTests(GameTestCase):
         self.assertEqual(game.kills, 1)
         self.assertGreater(game.score, 0)
         self.assertNotIn(enemy, game.enemies)
+
+    def test_piercing_bullet_hits_two_enemies(self):
+        game = self.make_game()
+        near = EnemyShip("scout", "normal", self.app.resources, x=400, y=340)
+        far = EnemyShip("scout", "normal", self.app.resources, x=400, y=320)
+        self.assertEqual(near.hp, 2)
+        bullet = Bullet(400, 360, vy=-1000, radius=4, damage=2, pierce=1)
+        bullet.update(0.05)
+        game.enemies = [near, far]
+        game.player_bullets = [bullet]
+        game._update_collisions()
+        self.assertFalse(near.alive)
+        self.assertFalse(far.alive)
+        self.assertEqual(game.enemies, [])
+        self.assertGreaterEqual(game.kills, 2)
+
+    def test_splash_bullet_damages_neighbours(self):
+        game = self.make_game()
+        primary = EnemyShip("scout", "normal", self.app.resources, x=500, y=400)
+        neighbour = EnemyShip("scout", "normal", self.app.resources, x=540, y=400)
+        primary.hp = 1
+        game.enemies = [primary, neighbour]
+        game.player_bullets = [Bullet(500, 400, damage=2, splash=60)]
+        game._update_collisions()
+        self.assertNotIn(primary, game.enemies)
+        self.assertEqual(neighbour.hp, neighbour.max_hp - 1)
 
     def test_large_asteroid_splits_into_two_small_ones(self):
         game = self.make_game()
@@ -324,6 +564,15 @@ class GameFlowTests(GameTestCase):
 
 
 class MenuTests(GameTestCase):
+    def _restore_ship(self, kind):
+        self.app.settings.ship = kind
+        self.app.resources.select_ship(kind)
+        self.app.settings.save()
+
+    def _restore_quality(self, value):
+        self.app.settings.effects_quality = value
+        self.app.settings.save()
+
     def test_main_menu_keyboard_navigation(self):
         menu = Menu(self.app)
         menu.handle_event(pygame.event.Event(pygame.KEYDOWN, key=pygame.K_DOWN))
@@ -355,7 +604,8 @@ class MenuTests(GameTestCase):
 
     def test_main_menu_mouse_clicks_button(self):
         menu = Menu(self.app)
-        button = menu.widgets.widgets[1]  # Leaderboard
+        button = next(widget for widget in menu.widgets.widgets
+                      if widget.action == "leaderboard")
         point = button.rect.center
         menu.handle_event(pygame.event.Event(pygame.MOUSEMOTION, pos=point), point)
         menu.handle_event(pygame.event.Event(pygame.MOUSEBUTTONUP, button=1), point)
@@ -384,12 +634,51 @@ class MenuTests(GameTestCase):
 
     def test_every_menu_screen_draws(self):
         menu = Menu(self.app)
-        for screen in ("main", "mode", "settings", "leaderboard", "controls"):
+        for screen in ("main", "mode", "hangar", "settings", "leaderboard", "controls"):
             menu._set_screen(screen)
             for _ in range(5):
                 menu.update(1.0 / 60.0)
                 menu.draw(self.app.canvas)
             self.assertEqual(menu.screen, screen)
+
+    def test_hangar_cycles_and_selects_ship(self):
+        original = self.app.settings.ship
+        self.addCleanup(self._restore_ship, original)
+        menu = Menu(self.app)
+        menu._set_screen("hangar")
+        menu.draw(self.app.canvas)
+        before = menu.hangar_focus
+        menu.handle_event(pygame.event.Event(pygame.KEYDOWN, key=pygame.K_RIGHT))
+        self.assertEqual(menu.hangar_focus, (before + 1) % 4)
+        menu.handle_event(pygame.event.Event(pygame.KEYDOWN, key=pygame.K_RETURN))
+        self.assertEqual(self.app.settings.ship, SHIP_ORDER[menu.hangar_focus])
+        self.assertEqual(self.app.resources.ship_frames,
+                         self.app.resources.ship_frames_for(self.app.settings.ship))
+        menu._set_screen("main")
+        menu.draw(self.app.canvas)
+
+    def test_hangar_mouse_selects_card(self):
+        original = self.app.settings.ship
+        self.addCleanup(self._restore_ship, original)
+        menu = Menu(self.app)
+        menu._set_screen("hangar")
+        menu.draw(self.app.canvas)
+        point = menu.hangar_cards[2].center
+        menu.handle_event(pygame.event.Event(pygame.MOUSEMOTION, pos=point), point)
+        menu.handle_event(pygame.event.Event(pygame.MOUSEBUTTONUP, button=1), point)
+        menu.handle_event(pygame.event.Event(pygame.MOUSEBUTTONUP, button=1), point)
+        self.assertEqual(self.app.settings.ship, SHIP_ORDER[2])
+
+    def test_settings_quality_changes_backdrop(self):
+        menu = Menu(self.app)
+        menu._set_screen("settings")
+        quality = menu.widgets.widgets[6]
+        menu.widgets.selected = 6
+        before = self.app.settings.effects_quality
+        menu.handle_event(pygame.event.Event(pygame.KEYDOWN, key=pygame.K_RIGHT))
+        self.assertNotEqual(self.app.settings.effects_quality, before)
+        self.assertEqual(menu.backdrop.quality, self.app.settings.effects_quality)
+        self.addCleanup(self._restore_quality, before)
 
     def test_escape_from_main_quits(self):
         menu = Menu(self.app)

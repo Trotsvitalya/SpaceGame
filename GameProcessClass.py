@@ -1,4 +1,9 @@
-"""Main gameplay scene: player, enemies, projectiles, power-ups and HUD."""
+"""Main gameplay scene: player, enemies, projectiles, hazards and HUD.
+
+The run is built from the data in :mod:`GameData`: the selected ship picks a
+weapon class, waves rotate through space zones, bosses have three phases and
+cleared waves can offer permanent-for-the-run salvage upgrades.
+"""
 
 from __future__ import annotations
 
@@ -8,11 +13,16 @@ import random
 import pygame
 
 from BulletClass import Bullet, EnemyBullet
-from EffectsClass import Effects, ScreenShake, StarField
+from EffectsClass import Effects, ScreenShake
 from EnemyAsteroidClass import BossEnemy, EnemyAsteroid, EnemyShip
+from GameData import (SHIPS, UPGRADES, UPGRADE_ORDER, WEAPONS, ZONES,
+                      boss_kind_for_wave, upgrade_available, upgrade_cost,
+                      zone_for_wave, zone_index_for_wave)
+from Hazards import BeamAttack, DangerZone
 from Localization import meme_taunt, tr
 from PowerUpClass import PowerUp
 from ResourcesClass import palette_for
+from SpaceBackdrop import SpaceBackdrop
 from UIClass import Button, WidgetGroup, draw_bar, draw_panel, draw_text
 from UserShipClass import UserShip
 from utils import (VH, VW, circle_hit, clamp, format_score, format_time,
@@ -26,6 +36,15 @@ class GameProcess:
     MAX_ENEMY_BULLETS = 240
     MAX_POWERUPS = 9
 
+    SALVAGE_REWARD = {
+        "asteroid": 1,
+        "scout": 2,
+        "fighter": 3,
+        "bomber": 4,
+        "raider": 3,
+        "elite": 6,
+    }
+
     def __init__(self, app, mode="normal"):
         self.app = app
         self.mode = mode if mode in ("normal", "meme") else "normal"
@@ -37,26 +56,38 @@ class GameProcess:
         self.isRunMainLoop = True
 
         self.world = pygame.Surface((VW, VH)).convert()
-        self.background_index = random.randrange(self.resources.background_count)
-        self.starfield = StarField(seed=random.randint(1, 99999))
-        self.effects = Effects(self.resources)
+        self.backdrop = SpaceBackdrop(
+            self.resources, self.mode, zone=zone_index_for_wave(1),
+            seed=random.randint(1, 99999),
+            quality=getattr(self.settings, "effects_quality", 2),
+        )
+        self.zone_id = self.backdrop.zone["id"]
+        self.effects = Effects(self.resources,
+                               quality=getattr(self.settings, "effects_quality", 2))
         self.shake = ScreenShake()
 
+        self.ship_kind = getattr(self.settings, "ship", "fighter")
+        if self.ship_kind not in SHIPS:
+            self.ship_kind = "fighter"
         self.player = UserShip(
-            VW * 0.5 - 39, VH - 150, VW, VH,
-            imageList=self.resources.ship_frames,
+            VW * 0.5 - 39, VH - 178, VW, VH,
+            imageList=self.resources.ship_frames_for(self.ship_kind),
             imageBoomList=self.resources.boom_sources,
+            kind=self.ship_kind,
         )
         self.player_bullets = []
         self.enemy_bullets = []
         self.enemies = []
         self.powerups = []
+        self.danger_zones = []
+        self.beams = []
         self.boss = None
         self.boss_drop_flags = {}
 
         self.score = 0.0
         self.display_score = 0.0
         self.kills = 0
+        self.salvage = 0
         self.wave = 1
         self.game_time = 0.0
         self.best_before = app.leaderboard.best(self.mode)
@@ -68,8 +99,6 @@ class GameProcess:
         self.combo_timer = 0.0
         self.multiplier = 1
         self.engine_accum = 0.0
-        self.bg_offset = 0.0
-        self.nebula_offset = 0.0
         self.time = 0.0
         self.info_timer = 11.0
         self.state = "playing"
@@ -91,6 +120,9 @@ class GameProcess:
         self.enemy_bullet_sprite = self.resources.enemy_bullet(self.mode)
         self.music_started = False
         self.hide_cursor = True
+
+        self.upgrade_choices = []
+        self.upgrade_focus = 0
 
         self._announce(tr(self.language, "wave_announce", wave=self.wave),
                        self.palette["accent"], 2.4)
@@ -129,6 +161,10 @@ class GameProcess:
             return
         if event.type == pygame.KEYDOWN and event.key == pygame.K_F11:
             self.app.toggle_fullscreen()
+            return
+
+        if self.state == "upgrade":
+            self._handle_upgrade_event(event, mouse)
             return
 
         if self.state == "paused":
@@ -246,19 +282,23 @@ class GameProcess:
         shots = self.player.fire_volley()
         if not shots:
             return
-        for x, y, vx, vy in shots:
+        weapon = WEAPONS.get(self.player.weapon_class, WEAPONS["pulse"])
+        color = weapon["color"] if self.mode == "normal" else self.palette["bullet"]
+        sprite = self.resources.bullet_sprite("player_" + self.player.weapon_class,
+                                              self.mode)
+        for shot in shots:
             if len(self.player_bullets) >= self.MAX_PLAYER_BULLETS:
                 self.player_bullets.pop(0)
             self.player_bullets.append(Bullet(
-                x, y, self.resources.bullet_frames, vx=vx, vy=vy,
-                radius=8.0, damage=1,
-                color=self.palette["bullet"],
+                shot.x, shot.y, sprite=sprite, vx=shot.vx, vy=shot.vy,
+                radius=shot.radius, damage=shot.damage, color=color,
+                kind=shot.kind, pierce=shot.pierce, splash=shot.splash,
             ))
-        self.effects.hit_sparks(
-            self.player.centerx, self.player.posY + 4,
-            self.palette["bullet"], count=3,
+        self.effects.muzzle(
+            self.player.centerx, self.player.posY + 2, color,
+            angle=-math.pi / 2, intensity=0.7,
         )
-        self.audio.play("shot", 0.38, throttle_ms=45)
+        self.audio.play(weapon.get("sound", "shot"), 0.38, throttle_ms=45)
         if self.mode == "meme" and random.random() < 0.2:
             self.audio.play("meme_boing", 0.12, throttle_ms=180)
 
@@ -281,14 +321,41 @@ class GameProcess:
             if enemy.alive:
                 enemy.update(dt, self)
         if self.boss is not None:
-            self.boss.update(dt, self)
+            for event_name in self.boss.update(dt, self):
+                self._handle_boss_event(event_name)
         self.enemies = [enemy for enemy in self.enemies if enemy.alive]
-        if self.enemies and len(self.enemies) > self.MAX_ENEMIES:
+        if len(self.enemies) > self.MAX_ENEMIES:
             del self.enemies[self.MAX_ENEMIES:]
+
+    def _handle_boss_event(self, event_name):
+        if event_name in ("phase2", "phase3"):
+            phase = int(event_name[-1])
+            self._announce(
+                tr(self.language, "boss_phase", phase=phase),
+                self.palette["warning"] if phase == 2 else self.palette["danger"],
+                2.4, sub=tr(self.language, "boss_phase_hint"),
+            )
+            self.audio.play("boss_warn", 0.7)
+            self.shake.add(0.35)
+        elif event_name == "beam":
+            self.audio.play("boss_warn", 0.45, throttle_ms=260)
+        elif event_name == "zones":
+            self.audio.play("boss_warn", 0.4, throttle_ms=240)
+        elif event_name == "minions":
+            self._announce(tr(self.language, "boss_minions"), self.palette["warning"],
+                           1.8)
+
+    def _update_hazards(self, dt):
+        for zone in self.danger_zones:
+            zone.update(dt)
+        for beam in self.beams:
+            beam.update(dt)
+        self.danger_zones = [zone for zone in self.danger_zones if zone.alive]
+        self.beams = [beam for beam in self.beams if beam.alive]
 
     def _update_powerups(self, dt):
         for powerup in self.powerups:
-            powerup.update(dt)
+            powerup.update(dt, self.player)
         self.powerups = [powerup for powerup in self.powerups if powerup.alive]
 
     def _update_combo(self, dt):
@@ -310,21 +377,37 @@ class GameProcess:
         if self.boss is not None:
             return
         self.wave_timer += dt
-        if self.wave_timer >= self.WAVE_DURATION:
-            self.wave_timer = 0.0
-            self.wave += 1
-            if self.wave % 5 == 0:
-                self._spawn_boss()
-            else:
-                self._announce(
-                    tr(self.language, "wave_announce", wave=self.wave),
-                    self.palette["accent"], 2.4,
-                )
-                self.audio.play("wave", 0.6)
-                self._spawn_powerup(
-                    random.uniform(160, VW - 160), 120,
-                    random.choice(("weapon", "shield", "rapid")),
-                )
+        if self.wave_timer < self.WAVE_DURATION:
+            return
+        self.wave_timer = 0.0
+        self.wave += 1
+        self._sync_zone(announce=True)
+        if self.wave % 5 == 0:
+            self._spawn_boss()
+            return
+        self._announce(
+            tr(self.language, "wave_announce", wave=self.wave),
+            self.palette["accent"], 2.4,
+        )
+        self.audio.play("wave", 0.6)
+        self._spawn_powerup(
+            random.uniform(160, VW - 160), 120,
+            random.choice(("weapon", "shield", "rapid")),
+        )
+        if self.wave % 3 == 0:
+            self._open_upgrade()
+
+    def _sync_zone(self, announce=False):
+        index = zone_index_for_wave(self.wave)
+        zone = ZONES[index]
+        if zone["id"] == self.zone_id:
+            return
+        self.zone_id = zone["id"]
+        self.backdrop.set_zone(index, fade=True)
+        if announce:
+            self._announce(tr(self.language, zone["name"]), zone["accent"], 2.8,
+                           sub=tr(self.language, "zone_enter"))
+            self.audio.play("wave", 0.5)
 
     def update(self, dt):
         if self.state == "paused":
@@ -340,12 +423,13 @@ class GameProcess:
 
         boost = max(0.0, -self.player.vy)
         time_scale = 0.35 if self.state == "gameover" else 1.0
-        self.starfield.update(dt * time_scale, boost * 0.7)
-        background_speed = 26.0 + boost * 0.24
-        self.bg_offset = (self.bg_offset + background_speed * dt) % (VH * 2)
-        self.nebula_offset = (self.nebula_offset + 9.0 * dt) % VH
+        self.backdrop.update(dt * time_scale, boost * 0.7)
         self.effects.update(dt * (0.55 if self.state == "gameover" else 1.0))
+        self._update_hazards(dt * time_scale)
 
+        if self.state == "upgrade":
+            self._update_announcements(dt)
+            return
         if self.state == "gameover":
             self.overlay_time += dt
             return
@@ -367,6 +451,7 @@ class GameProcess:
         self._update_announcements(dt)
         if self.state == "playing":
             self._update_waves(dt)
+        if self.state == "playing":
             self.spawn_timer -= dt
             if self.spawn_timer <= 0 and self.boss is None:
                 self._spawn_enemy()
@@ -374,47 +459,50 @@ class GameProcess:
 
     # ------------------------------------------------------------- spawning
     def _spawn_interval(self):
-        base = max(0.55, 1.42 - 0.074 * (self.wave - 1))
-        return base * random.uniform(0.72, 1.22)
+        base = max(0.5, 1.42 - 0.074 * (self.wave - 1))
+        return base * random.uniform(0.7, 1.2)
 
     def _spawn_enemy(self):
         if self.boss is not None or len(self.enemies) >= self.MAX_ENEMIES:
             return
         roll = random.random()
+        zone = zone_for_wave(self.wave)
         if self.wave <= 1:
             kind = "asteroid"
         elif self.wave == 2:
-            kind = "asteroid" if roll < 0.75 else "scout"
-        elif self.wave == 3:
-            kind = "asteroid" if roll < 0.55 else "scout" if roll < 0.82 else "fighter"
+            kind = "asteroid" if roll < 0.72 else "scout"
         else:
-            if roll < 0.42:
-                kind = "asteroid"
-            elif roll < 0.66:
-                kind = "scout"
-            elif roll < 0.85:
-                kind = "fighter"
-            else:
-                kind = "bomber"
+            pool = [kind for kind in zone["enemies"] if kind != "asteroid"]
+            if self.wave < 4:
+                pool = [kind for kind in pool if kind in ("scout", "fighter")]
+            if self.wave < 6:
+                pool = [kind for kind in pool if kind != "elite"]
+            if not pool:
+                pool = ["scout"]
+            kind = "asteroid" if roll < 0.30 else random.choice(pool)
         if kind == "asteroid":
             self._spawn_asteroid()
         else:
             self._spawn_ship(kind)
 
-    def _spawn_asteroid(self, x=None, y=None, level=None, radius=None):
+    def _spawn_asteroid(self, x=None, y=None, level=None, radius=None,
+                        rot_index=None, defer=False):
         if len(self.enemies) >= self.MAX_ENEMIES + 4:
             return None
         if level is None:
             level = "large" if random.random() < 0.38 else "small"
         if radius is None:
             radius = random.randint(30, 48) if level == "large" else random.randint(17, 25)
-        index = random.randrange(len(self.resources.asteroid_sources))
+        index = (rot_index if rot_index is not None
+                 else random.randrange(len(self.resources.asteroid_sources)))
         image = self.resources.asteroid(index, radius)
         asteroid = EnemyAsteroid(
             VW, VH, image, None, x=x, y=y, radius=radius,
             speed_scale=1.0 + 0.022 * (self.wave - 1), level=level,
+            resources=self.resources, rot_index=index,
         )
-        self.enemies.append(asteroid)
+        if not defer:
+            self.enemies.append(asteroid)
         return asteroid
 
     def _spawn_ship(self, kind, x=None, y=-70, wave=None):
@@ -435,17 +523,24 @@ class GameProcess:
                 enemy.alive = False
         self.enemies.clear()
         self.enemy_bullets.clear()
-        self.boss = BossEnemy(self.mode, self.resources, self.wave)
+        self.danger_zones.clear()
+        self.beams.clear()
+        self.boss = BossEnemy(self.mode, self.resources, self.wave,
+                              kind=boss_kind_for_wave(self.wave))
         self.boss_drop_flags = {0.66: False, 0.33: False}
         self._announce(tr(self.language, "boss_warning"), self.palette["danger"], 3.6,
-                       sub=tr(self.language, "boss_name"))
+                       sub=tr(self.language, self.boss.name_key))
         self.audio.play("boss_warn", 0.8)
         self.audio.play("wave", 0.5)
         self.shake.add(0.55)
 
-    def _spawn_boss_minions(self, boss):
-        for offset in (-120, 120):
+    def spawn_boss_minions(self, boss):
+        offsets = (-130, 130)
+        for offset in offsets:
             self._spawn_ship("scout", x=clamp(boss.posX + offset, 80, VW - 80),
+                             y=boss.posY, wave=self.wave)
+        if boss.phase >= 3:
+            self._spawn_ship("elite", x=clamp(boss.posX, 100, VW - 100),
                              y=boss.posY, wave=self.wave)
         self.effects.ring(boss.posX, boss.posY, self.palette["danger"], 180, 0.7, 4)
         self.audio.play("boss_warn", 0.35, throttle_ms=300)
@@ -464,13 +559,48 @@ class GameProcess:
             "scout": 0.13,
             "fighter": 0.2,
             "bomber": 0.34,
+            "raider": 0.22,
+            "elite": 0.55,
         }.get(enemy.kind, 0.1)
-        if enemy.kind == "boss":
-            chance = 1.0
         if random.random() < chance:
             self._spawn_powerup(enemy.posX, enemy.posY, PowerUp.random_kind())
 
     # ------------------------------------------------------------ collisions
+    def _bullet_hit_target(self, bullet, target):
+        if not target.alive or id(target) in bullet.hits:
+            return False
+        if not segment_circle_hit(
+            bullet.prev_x, bullet.prev_y, bullet.posX, bullet.posY,
+            target.posX, target.posY, target.hit_radius + bullet.radius,
+        ):
+            return False
+        bullet.hits.add(id(target))
+        killed = target.damage(bullet.damage)
+        spark_color = (self.palette["warning"] if target.kind == "boss"
+                       else self.palette["bullet"])
+        self.effects.hit_sparks(bullet.posX, bullet.posY, spark_color, count=5)
+        if bullet.pierce > 0:
+            bullet.pierce -= 1
+        else:
+            bullet.alive = False
+        return killed
+
+    def _apply_splash(self, bullet, origin):
+        if bullet.splash <= 0:
+            return
+        for enemy in self.enemies:
+            if not enemy.alive or enemy is origin:
+                continue
+            if circle_hit(enemy.posX, enemy.posY, enemy.hit_radius,
+                          origin.posX, origin.posY, bullet.splash):
+                if enemy.damage(bullet.damage * 0.5):
+                    self._kill_enemy(enemy)
+        if self.boss is not None and self.boss.alive and self.boss is not origin:
+            if circle_hit(self.boss.posX, self.boss.posY, self.boss.hit_radius,
+                          origin.posX, origin.posY, bullet.splash):
+                if self.boss.damage(bullet.damage * 0.5):
+                    self._defeat_boss()
+
     def _update_collisions(self):
         # Player bullets vs regular enemies.
         for enemy in self.enemies:
@@ -479,17 +609,10 @@ class GameProcess:
             for bullet in self.player_bullets:
                 if not bullet.alive:
                     continue
-                if segment_circle_hit(
-                    bullet.prev_x, bullet.prev_y, bullet.posX, bullet.posY,
-                    enemy.posX, enemy.posY, enemy.hit_radius + bullet.radius,
-                ):
-                    bullet.alive = False
-                    killed = enemy.damage(bullet.damage)
-                    self.effects.hit_sparks(
-                        bullet.posX, bullet.posY, self.palette["bullet"], count=5
-                    )
-                    if killed:
-                        self._kill_enemy(enemy)
+                if self._bullet_hit_target(bullet, enemy):
+                    self._apply_splash(bullet, enemy)
+                    self._kill_enemy(enemy)
+                if not bullet.alive:
                     break
 
         # Player bullets vs boss.
@@ -498,32 +621,24 @@ class GameProcess:
             for bullet in self.player_bullets:
                 if not bullet.alive:
                     continue
-                if segment_circle_hit(
-                    bullet.prev_x, bullet.prev_y, bullet.posX, bullet.posY,
-                    boss.posX, boss.posY, boss.hit_radius + bullet.radius,
-                ):
-                    bullet.alive = False
-                    killed = boss.damage(bullet.damage)
-                    self.effects.hit_sparks(
-                        bullet.posX, bullet.posY, self.palette["warning"], count=6
-                    )
-                    if killed:
-                        self._defeat_boss()
-                        break
-                    ratio = boss.hp / max(1, boss.max_hp)
-                    for threshold in (0.66, 0.33):
-                        if not self.boss_drop_flags.get(threshold, True) and ratio <= threshold:
-                            self.boss_drop_flags[threshold] = True
-                            self._spawn_powerup(
-                                boss.posX + random.uniform(-70, 70),
-                                boss.posY + 50,
-                                "weapon" if threshold > 0.5 else "shield",
-                            )
-                            self.effects.text(
-                                tr(self.language, "powerup_hint"),
-                                boss.posX, boss.posY + 90,
-                                self.palette["warning"], 16, 1.3,
-                            )
+                if self._bullet_hit_target(bullet, boss):
+                    self._apply_splash(bullet, boss)
+                    self._defeat_boss()
+                    break
+                ratio = boss.hp / max(1, boss.max_hp)
+                for threshold in (0.66, 0.33):
+                    if not self.boss_drop_flags.get(threshold, True) and ratio <= threshold:
+                        self.boss_drop_flags[threshold] = True
+                        self._spawn_powerup(
+                            boss.posX + random.uniform(-70, 70),
+                            boss.posY + 50,
+                            "weapon" if threshold > 0.5 else "shield",
+                        )
+                        self.effects.text(
+                            tr(self.language, "powerup_hint"),
+                            boss.posX, boss.posY + 90,
+                            self.palette["warning"], 16, 1.3,
+                        )
 
         # Enemy bullets vs player.
         if self.player.alive:
@@ -539,6 +654,26 @@ class GameProcess:
                     result = self._player_hit()
                     if result != "none":
                         break
+
+        # Telegraphed hazards.
+        if self.player.alive:
+            for zone in self.danger_zones:
+                if zone.active and not zone.hit_player and zone.contains(
+                    self.player.centerx, self.player.centery,
+                    self.player.hit_radius * 0.45,
+                ):
+                    zone.hit_player = True
+                    if self._player_hit() != "none":
+                        break
+            if self.player.alive:
+                for beam in self.beams:
+                    if not beam.hit_player and beam.hits(
+                        self.player.centerx, self.player.centery,
+                        self.player.hit_radius * 0.7,
+                    ):
+                        beam.hit_player = True
+                        if self._player_hit() != "none":
+                            break
 
         # Contact damage.
         if self.player.alive:
@@ -633,6 +768,10 @@ class GameProcess:
                     f"x{self.multiplier}", clamp(enemy.posX, 44, VW - 44),
                     clamp(enemy.posY - 20, 86, VH - 70), self.palette["warning"], 15, 0.9,
                 )
+        salvage = int(round(self.SALVAGE_REWARD.get(enemy.kind, 1)
+                            * self.player.salvage_mult))
+        if salvage > 0:
+            self.salvage += salvage
         radius = float(getattr(enemy, "radius", 28))
         if enemy.kind == "asteroid":
             self.effects.boom(enemy.posX, enemy.posY, radius * 1.25)
@@ -646,11 +785,13 @@ class GameProcess:
                         x=clamp(enemy.posX + direction * 20, 30, VW - 30),
                         y=clamp(enemy.posY, 30, VH - 120),
                         level="small", radius=random.randint(17, 23),
+                        rot_index=getattr(enemy, "rot_index", None),
+                        defer=True,
                     )
                     if child is not None:
                         child.vx = direction * random.uniform(80, 140)
                         child.vy = random.uniform(90, 150)
-                        self.pending_asteroids.append(self.enemies.pop())
+                        self.pending_asteroids.append(child)
             self.shake.add(0.12)
         else:
             self.effects.explosion(
@@ -659,7 +800,8 @@ class GameProcess:
             )
             self.effects.ring(enemy.posX, enemy.posY, self.palette["accent"], 54, 0.35, 2)
             self.shake.add(0.18)
-        self.audio.play("crash", 0.55 if enemy.kind == "asteroid" else 0.7, throttle_ms=35)
+        self.audio.play("crash", 0.55 if enemy.kind == "asteroid" else 0.7,
+                        throttle_ms=35)
         if self.mode == "meme":
             if self.kills % 4 == 0:
                 self.taunt_text = meme_taunt(self.language, self.meme_index)
@@ -678,6 +820,7 @@ class GameProcess:
         boss.alive = False
         self.kills += 1
         gained = self._register_kill(int(boss.score))
+        self.salvage += 20 + self.wave
         self.effects.text(
             f"+{gained}", boss.posX, boss.posY,
             self.palette["warning"], 30, 1.8,
@@ -689,14 +832,18 @@ class GameProcess:
             self.audio.play("meme_explode", 0.9)
         self.shake.add(1.0)
         self.enemy_bullets.clear()
+        self.danger_zones.clear()
+        self.beams.clear()
         for kind, offset in (("weapon", -90), ("shield", 0), ("life", 90)):
             self._spawn_powerup(boss.posX + offset, boss.posY + 30, kind)
         self.boss = None
         self.wave += 1
         self.wave_timer = 0.0
+        self._sync_zone(announce=False)
         self._announce(tr(self.language, "boss_defeated"), self.palette["success"], 3.0,
                        sub=tr(self.language, "wave_announce", wave=self.wave))
         self.audio.play("wave", 0.9)
+        self._open_upgrade()
 
     def _clear_enemy_bullets_near(self, x, y, radius):
         for bullet in self.enemy_bullets:
@@ -762,14 +909,128 @@ class GameProcess:
             self.audio.play("powerup" if kind != "points" else "pickup", 0.75)
 
     # ---------------------------------------------------------- projectiles
-    def spawn_enemy_bullet(self, x, y, angle, speed, radius=6.0):
+    def spawn_enemy_bullet(self, x, y, angle, speed, radius=6.0, kind="enemy_orb"):
         if len(self.enemy_bullets) >= self.MAX_ENEMY_BULLETS:
             self.enemy_bullets.pop(0)
+        sprite = self.resources.bullet_sprite(kind, self.mode)
+        color = (self.palette["accent2"] if kind == "enemy_plasma"
+                 else self.enemy_bullet_color)
         self.enemy_bullets.append(EnemyBullet(
             x, y, math.cos(angle) * speed, math.sin(angle) * speed,
-            radius=radius, mode=self.mode, color=self.enemy_bullet_color,
-            sprite=self.enemy_bullet_sprite,
+            radius=radius, mode=self.mode, color=color,
+            sprite=sprite, kind=kind,
         ))
+
+    def spawn_danger_zone(self, x, y, radius=96.0, warn=1.15, duration=1.6):
+        self.danger_zones.append(DangerZone(
+            x, y, radius=radius, warn=warn, duration=duration,
+            color=self.palette["danger"],
+        ))
+        if len(self.danger_zones) > 8:
+            self.danger_zones.pop(0)
+
+    def spawn_beam(self, x, y, angle, warn=1.0, duration=0.4, width=18.0,
+                   sweep=0.0, color=None):
+        self.beams.append(BeamAttack(
+            x, y, angle, warn=warn, duration=duration,
+            width=width, sweep=sweep,
+            color=color or self.palette["danger"],
+        ))
+        if len(self.beams) > 6:
+            self.beams.pop(0)
+
+    # -------------------------------------------------------------- upgrades
+    def _available_upgrades(self):
+        return [key for key in UPGRADE_ORDER
+                if upgrade_available(key, self.player.upgrades)]
+
+    def _upgrade_card_rects(self):
+        card_w = 300
+        gap = 22
+        total = card_w * 3 + gap * 2
+        left = VW // 2 - total // 2
+        return [pygame.Rect(left + index * (card_w + gap), 262, card_w, 290)
+                for index in range(3)]
+
+    def _upgrade_skip_rect(self):
+        return pygame.Rect(VW // 2 - 90, 574, 180, 40)
+
+    def _open_upgrade(self):
+        if self.state != "playing":
+            return
+        pool = self._available_upgrades()
+        if not pool:
+            return
+        random.shuffle(pool)
+        self.upgrade_choices = [
+            (key, upgrade_cost(key, self.player.upgrade_level(key)))
+            for key in pool[:3]
+        ]
+        self.upgrade_focus = 0
+        self.state = "upgrade"
+        self.audio.play("powerup", 0.7)
+        self.effects.ring(self.player.centerx, self.player.centery,
+                          self.palette["warning"], 120, 0.7, 3)
+
+    def _close_upgrade(self):
+        if self.state != "upgrade":
+            return
+        self.state = "playing"
+        self.upgrade_choices = []
+        self.spawn_timer = min(self.spawn_timer, 0.8)
+        self.audio.play("ui_click", 0.5)
+
+    def _apply_upgrade(self, index):
+        if index < 0 or index >= len(self.upgrade_choices):
+            return
+        key, cost = self.upgrade_choices[index]
+        spec = UPGRADES[key]
+        if not upgrade_available(key, self.player.upgrades):
+            return
+        if self.salvage < cost:
+            self.audio.play("hit", 0.4, throttle_ms=160)
+            self.effects.text(tr(self.language, "upgrade_no_salvage"),
+                              VW // 2, 548, self.palette["danger"], 15, 0.9)
+            return
+        self.salvage -= cost
+        if self.player.apply_upgrade(key):
+            self.effects.text(
+                tr(self.language, "upgrade_applied",
+                   name=tr(self.language, spec["name"])),
+                VW // 2, 210, spec["color"], 20, 1.4,
+            )
+            self.audio.play("weapon" if key in ("damage", "multishot") else "powerup",
+                            0.8)
+        self._close_upgrade()
+
+    def _handle_upgrade_event(self, event, mouse):
+        if event.type == pygame.KEYDOWN:
+            if event.key in (pygame.K_ESCAPE, pygame.K_BACKSPACE):
+                self._close_upgrade()
+            elif event.key in (pygame.K_LEFT, pygame.K_a, pygame.K_UP, pygame.K_w):
+                self.upgrade_focus = (self.upgrade_focus - 1) % max(1, len(self.upgrade_choices))
+                self.audio.play("ui_hover", 0.35, throttle_ms=55)
+            elif event.key in (pygame.K_RIGHT, pygame.K_d, pygame.K_DOWN, pygame.K_s):
+                self.upgrade_focus = (self.upgrade_focus + 1) % max(1, len(self.upgrade_choices))
+                self.audio.play("ui_hover", 0.35, throttle_ms=55)
+            elif event.key in (pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_SPACE):
+                self._apply_upgrade(self.upgrade_focus)
+            elif event.key in (pygame.K_1, pygame.K_2, pygame.K_3):
+                self._apply_upgrade(event.key - pygame.K_1)
+            return
+        if event.type == pygame.MOUSEMOTION:
+            for index, rect in enumerate(self._upgrade_card_rects()):
+                if index < len(self.upgrade_choices) and rect.collidepoint(mouse):
+                    if self.upgrade_focus != index:
+                        self.upgrade_focus = index
+                        self.audio.play("ui_hover", 0.35, throttle_ms=55)
+        elif event.type == pygame.MOUSEBUTTONUP and event.button == 1:
+            for index, rect in enumerate(self._upgrade_card_rects()):
+                if index < len(self.upgrade_choices) and rect.collidepoint(mouse):
+                    self._apply_upgrade(index)
+                    return
+            if self._upgrade_skip_rect().collidepoint(mouse):
+                self._close_upgrade()
 
     # -------------------------------------------------------------- endgame
     def _pause(self):
@@ -821,6 +1082,7 @@ class GameProcess:
             "is_new": is_new,
             "best_before": best_before,
             "best": self.app.leaderboard.best(self.mode),
+            "salvage": self.salvage,
         }
         self._build_gameover_widgets()
 
@@ -845,39 +1107,26 @@ class GameProcess:
         canvas.blit(self.world, (offset_x, offset_y))
         self.effects.draw_flash(canvas)
         canvas.blit(self.resources.vignette, (0, 0))
-        self._draw_hud(canvas)
+        if self.state != "upgrade":
+            self._draw_hud(canvas)
         if self.state == "dying":
             overlay = pygame.Surface((VW, VH), pygame.SRCALPHA)
             overlay.fill((80, 10, 20, 45))
             canvas.blit(overlay, (0, 0))
         elif self.state == "paused":
             self._draw_pause(canvas)
+        elif self.state == "upgrade":
+            self._draw_upgrade(canvas)
         elif self.state == "gameover":
             self._draw_gameover(canvas)
 
     def _draw_world(self):
         world = self.world
         world.fill(self.palette["bg"])
-        background = self.resources.background(self.background_index, self.mode)
-        background_flip = self.resources.background_flipped(self.background_index, self.mode)
-        bg_y = -(int(self.bg_offset) % (VH * 2))
-        for index in range(3):
-            tile = background if index % 2 == 0 else background_flip
-            world.blit(tile, (0, bg_y + index * VH))
+        self.backdrop.draw(world)
 
-        nebula = self.resources.nebula(self.mode)
-        neb_y = int(self.nebula_offset)
-        world.blit(nebula, (0, neb_y - VH))
-        world.blit(nebula, (0, neb_y))
-
-        if self.mode == "meme":
-            planet = self.resources.menu_planet("meme")
-            planet.set_alpha(120)
-            world.blit(planet, (VW - 245, 76 + int(math.sin(self.time * 0.4) * 10)))
-            planet.set_alpha(255)
-
-        boost = max(0.0, -self.player.vy)
-        self.starfield.draw(world, self.palette["star"], boost)
+        for zone in self.danger_zones:
+            zone.draw(world, self.palette)
 
         for powerup in self.powerups:
             powerup.draw(world, self.resources)
@@ -887,13 +1136,16 @@ class GameProcess:
             if enemy.kind != "asteroid" and enemy.hp < enemy.max_hp:
                 draw_bar(
                     world,
-                    (int(enemy.posX - 20), int(enemy.posY - enemy.radius - 12), 40, 4),
+                    (int(enemy.posX - 22), int(enemy.posY - enemy.radius - 12), 44, 4),
                     enemy.hp / max(1, enemy.max_hp), self.palette["danger"],
                     (24, 16, 30), None, 2,
                 )
 
         if self.boss is not None:
             self.boss.draw(world, self.resources)
+
+        for beam in self.beams:
+            beam.draw(world)
 
         for bullet in self.player_bullets:
             bullet.draw(world)
@@ -905,24 +1157,27 @@ class GameProcess:
 
     def _draw_hud(self, canvas):
         palette = self.palette
+        zone = zone_for_wave(self.wave)
         top = pygame.Rect(18, 12, VW - 36, 60)
         draw_panel(canvas, top, (*palette["panel"], 210), palette["border"], 12, 1)
 
         score_label = tr(self.language, "meme_score" if self.mode == "meme" else "score")
         draw_text(canvas, self.resources, score_label, 11, palette["muted"], (36, 21))
-        draw_text(canvas, self.resources, format_score(self.display_score), 26,
-                  palette["accent"], (36, 32), kind="title", shadow=(2, 5, 12))
+        draw_text(canvas, self.resources, format_score(self.display_score), 27,
+                  palette["accent"], (36, 32), shadow=(2, 5, 12))
         best_value = max(self.best_before, int(self.score))
         draw_text(canvas, self.resources,
                   f"{tr(self.language, 'meme_best' if self.mode == 'meme' else 'best')}  {format_score(best_value)}",
                   11, palette["muted"], (240, 23))
+        draw_text(canvas, self.resources, tr(self.language, zone["name"]), 10,
+                  zone["accent"], (240, 48))
 
-        # Wave + progress.
+        # Wave + zone + progress.
         wave_label = tr(self.language, "meme_wave" if self.mode == "meme" else "wave")
         draw_text(canvas, self.resources, wave_label, 11, palette["muted"],
                   (VW // 2, 20), anchor="midtop")
-        draw_text(canvas, self.resources, f"{self.wave:02d}", 24, palette["text"],
-                  (VW // 2, 30), anchor="midtop", kind="title")
+        draw_text(canvas, self.resources, f"{self.wave:02d}", 23, palette["text"],
+                  (VW // 2, 30), anchor="midtop")
         if self.boss is None:
             progress = clamp(self.wave_timer / self.WAVE_DURATION, 0.0, 1.0)
             draw_bar(canvas, (VW // 2 - 70, 59, 140, 3), progress,
@@ -933,7 +1188,7 @@ class GameProcess:
         draw_text(canvas, self.resources, lives_label, 11, palette["muted"],
                   (VW - 36, 20), anchor="topright")
         icon = self.resources.ship_small
-        for index in range(min(5, self.player.life)):
+        for index in range(min(7, self.player.life)):
             canvas.blit(icon, (VW - 54 - index * 30, 36))
         if self.player.life <= 0:
             draw_text(canvas, self.resources, "0", 18, palette["danger"],
@@ -946,6 +1201,7 @@ class GameProcess:
             draw_text(canvas, self.resources, f"{int(self.player.shield_timer) + 1}s",
                       11, palette["accent2"], (VW - 200, 56), anchor="topright")
 
+        combo_y = 136 if (self.boss is not None and self.boss.entered) else 82
         if self.multiplier > 1:
             pulse = 0.8 + math.sin(self.time * 8.0) * 0.2
             color = (
@@ -956,54 +1212,58 @@ class GameProcess:
             combo_key = "meme_combo" if self.mode == "meme" else "combo"
             draw_text(canvas, self.resources,
                       tr(self.language, combo_key, multiplier=self.multiplier),
-                      18, color, (VW // 2, 82), anchor="midtop")
+                      18, color, (VW // 2, combo_y), anchor="midtop")
 
         if self.boss is not None and self.boss.entered:
             self._draw_boss_bar(canvas)
 
-        # Bottom-left weapon panel.
-        panel = pygame.Rect(18, VH - 66, 340, 48)
+        # Bottom-left weapon + salvage panel.
+        panel = pygame.Rect(18, VH - 70, 440, 52)
         draw_panel(canvas, panel, (*palette["panel"], 190), palette["border"], 10, 1)
+        weapon_spec = WEAPONS.get(self.player.weapon_class, WEAPONS["pulse"])
         draw_text(canvas, self.resources, tr(self.language, "weapon"), 10,
-                  palette["muted"], (32, VH - 60))
-        draw_text(canvas, self.resources, f"LVL {self.player.weapon_level}", 16,
-                  palette["accent"], (100, VH - 61))
+                  palette["muted"], (32, VH - 64))
+        draw_text(canvas, self.resources, tr(self.language, weapon_spec["name"]), 14,
+                  palette["accent"], (32, VH - 50))
         for index in range(3):
             color = palette["accent"] if index < self.player.weapon_level else (38, 48, 70)
-            pygame.draw.rect(canvas, color, (32 + index * 24, VH - 41, 18, 6),
+            pygame.draw.rect(canvas, color, (32 + index * 22, VH - 30, 16, 6),
                              border_radius=2)
+        draw_text(canvas, self.resources, tr(self.language, "salvage"), 10,
+                  palette["muted"], (panel.right - 18, VH - 64), anchor="topright")
+        draw_text(canvas, self.resources, str(self.salvage), 22,
+                  palette["warning"], (panel.right - 18, VH - 52), anchor="topright")
+
+        # Bottom-right timed bonuses.
+        panel_r = pygame.Rect(VW - 356, VH - 92, 338, 74)
+        draw_panel(canvas, panel_r, (*palette["panel"], 190), palette["border"], 10, 1)
+        row_y = VH - 82
         if self.player.weapon_timer > 0:
-            draw_bar(canvas, (168, VH - 42, 170, 5),
+            draw_text(canvas, self.resources, tr(self.language, "weapon"), 10,
+                      palette["muted"], (VW - 342, row_y))
+            draw_bar(canvas, (VW - 342, row_y + 13, 300, 4),
                      self.player.weapon_timer / 18.0, palette["warning"],
                      (28, 34, 54), None, 2)
-            draw_text(canvas, self.resources, f"{int(self.player.weapon_timer) + 1}s", 11,
-                      palette["warning"], (168, VH - 56))
-        elif self.player.rapid_timer <= 0:
-            draw_text(canvas, self.resources, "SPACE", 11, palette["muted"],
-                      (168, VH - 56))
-
-        # Bottom-right power-up timers.
-        panel_r = pygame.Rect(VW - 348, VH - 66, 330, 48)
-        draw_panel(canvas, panel_r, (*palette["panel"], 190), palette["border"], 10, 1)
-        row_y = VH - 57
+            row_y += 20
         if self.player.shield_timer > 0:
             draw_text(canvas, self.resources, tr(self.language, "shield"), 10,
-                      palette["muted"], (VW - 334, row_y))
-            draw_bar(canvas, (VW - 334, row_y + 16, 130, 5),
+                      palette["muted"], (VW - 342, row_y))
+            draw_bar(canvas, (VW - 342, row_y + 13, 300, 4),
                      self.player.shield_timer / 12.0, palette["accent"],
                      (28, 34, 54), None, 2)
-            row_y += 22
+            row_y += 20
         if self.player.rapid_timer > 0:
             draw_text(canvas, self.resources, tr(self.language, "rapid"), 10,
-                      palette["muted"], (VW - 188, VH - 57))
-            draw_bar(canvas, (VW - 188, VH - 41, 150, 5),
+                      palette["muted"], (VW - 342, row_y))
+            draw_bar(canvas, (VW - 342, row_y + 13, 300, 4),
                      self.player.rapid_timer / 11.0, palette["success"],
                      (28, 34, 54), None, 2)
-        if self.player.shield_timer <= 0 and self.player.rapid_timer <= 0:
+        if not any((self.player.weapon_timer, self.player.shield_timer,
+                    self.player.rapid_timer)):
             draw_text(canvas, self.resources, tr(self.language, "powerup_hint"), 12,
-                      palette["muted"], (VW - 334, VH - 46))
+                      palette["muted"], (VW - 342, VH - 64))
 
-        # Center announcement (gameplay only; never over the pause/game-over UI).
+        # Center announcement (gameplay only; never over overlays).
         if (self.state in ("playing", "dying")
                 and self.announce_timer > 0 and self.announce_text):
             progress = 1.0 - self.announce_timer / max(0.001, self.announce_duration)
@@ -1020,7 +1280,7 @@ class GameProcess:
         if self.state in ("playing", "dying") and self.taunt_timer > 0 and self.taunt_text:
             alpha = int(255 * min(1.0, self.taunt_timer / 0.5))
             draw_text(canvas, self.resources, self.taunt_text, 16,
-                      palette["accent2"], (VW // 2, VH - 56), anchor="center",
+                      palette["accent2"], (VW // 2, VH - 110), anchor="center",
                       alpha=alpha)
 
         # First-run controls hint.
@@ -1037,21 +1297,91 @@ class GameProcess:
     def _draw_boss_bar(self, canvas):
         palette = self.palette
         boss = self.boss
-        rect = pygame.Rect(VW // 2 - 260, 82, 520, 40)
+        rect = pygame.Rect(VW // 2 - 280, 82, 560, 44)
         draw_panel(canvas, rect, (*palette["panel"], 220), palette["danger"], 10, 1)
-        draw_text(canvas, self.resources, tr(self.language, "boss_name"), 13,
+        draw_text(canvas, self.resources, tr(self.language, boss.name_key), 13,
                   palette["danger"], (rect.x + 16, rect.y + 5))
+        phase_text = tr(self.language, "boss_phase", phase=boss.phase)
+        draw_text(canvas, self.resources, phase_text, 11,
+                  palette["warning"], (rect.right - 16, rect.y + 6), anchor="topright")
         hp = max(0, boss.hp)
         draw_text(canvas, self.resources, f"{int(hp)} / {boss.max_hp}", 11,
-                  palette["muted"], (rect.right - 16, rect.y + 6), anchor="topright")
-        draw_bar(canvas, (rect.x + 14, rect.y + 22, rect.width - 28, 10),
+                  palette["muted"], (rect.right - 16, rect.y + 23), anchor="topright")
+        draw_bar(canvas, (rect.x + 14, rect.y + 27, rect.width - 120, 10),
                  hp / max(1, boss.max_hp), palette["danger"],
                  (34, 18, 28), palette["border"], 3)
-        segments = 10
-        for index in range(1, segments):
-            x = rect.x + 14 + (rect.width - 28) * index / segments
-            pygame.draw.line(canvas, (18, 10, 20), (x, rect.y + 22),
-                             (x, rect.y + 32), 1)
+        for threshold in (0.33, 0.66):
+            x = rect.x + 14 + (rect.width - 120) * threshold
+            pygame.draw.line(canvas, (255, 220, 180), (x, rect.y + 26),
+                             (x, rect.y + 38), 1)
+
+    def _draw_upgrade(self, canvas):
+        palette = self.palette
+        overlay = pygame.Surface((VW, VH), pygame.SRCALPHA)
+        overlay.fill((3, 6, 16, 205))
+        canvas.blit(overlay, (0, 0))
+        cx = VW // 2
+        draw_text(canvas, self.resources, tr(self.language, "upgrade_title"), 38,
+                  palette["warning"], (cx, 112), anchor="center", shadow=(2, 6, 16))
+        draw_text(canvas, self.resources, tr(self.language, "upgrade_subtitle"), 15,
+                  palette["text"], (cx, 158), anchor="center")
+        draw_text(canvas, self.resources,
+                  f"{tr(self.language, 'salvage')}: {self.salvage}", 18,
+                  palette["warning"], (cx, 190), anchor="center")
+
+        rects = self._upgrade_card_rects()
+        for index, rect in enumerate(rects):
+            if index >= len(self.upgrade_choices):
+                continue
+            key, cost = self.upgrade_choices[index]
+            spec = UPGRADES[key]
+            level = self.player.upgrade_level(key)
+            focused = index == self.upgrade_focus
+            affordable = self.salvage >= cost
+            color = spec["color"] if affordable else palette["muted"]
+            border = color if focused else palette["border"]
+            draw_panel(canvas, rect.move(0, -5 if focused else 0),
+                       (18, 30, 58, 238), border, 14, 3 if focused else 1)
+            draw_text(canvas, self.resources, f"{index + 1}", 13, palette["muted"],
+                      (rect.x + 14, rect.y + 10))
+            icon = self.resources.powerup_sprite(
+                {"damage": "weapon", "firerate": "rapid", "hull": "life",
+                 "multishot": "weapon", "engine": "rapid", "salvage": "points",
+                 "shield": "shield"}.get(key, "points"), self.mode)
+            icon = pygame.transform.smoothscale(icon, (58, 58))
+            canvas.blit(icon, icon.get_rect(center=(rect.centerx, rect.y + 58)))
+            draw_text(canvas, self.resources, tr(self.language, spec["name"]), 20,
+                      color, (rect.centerx, rect.y + 104), anchor="center")
+            draw_text(canvas, self.resources,
+                      tr(self.language, "upgrade_level",
+                         level=level, max=spec["max"]), 11,
+                      palette["muted"], (rect.centerx, rect.y + 126),
+                      anchor="center")
+            for pip in range(spec["max"]):
+                pip_color = color if pip < level else (42, 52, 74)
+                pygame.draw.rect(canvas, pip_color,
+                                 (rect.centerx - spec["max"] * 10 + pip * 20,
+                                  rect.y + 142, 14, 5), border_radius=2)
+            lines = self.resources.wrap_text(
+                tr(self.language, spec["desc"]), 13, rect.width - 36
+            )
+            for line_index, line in enumerate(lines[:3]):
+                draw_text(canvas, self.resources, line, 13, palette["text"],
+                          (rect.centerx, rect.y + 162 + line_index * 19),
+                          anchor="center", alpha=220)
+            cost_color = palette["warning"] if affordable else palette["danger"]
+            draw_text(canvas, self.resources,
+                      f"{tr(self.language, 'upgrade_cost')} {cost}", 16,
+                      cost_color, (rect.centerx, rect.bottom - 24), anchor="center")
+
+        skip = self._upgrade_skip_rect()
+        hovered = skip.collidepoint(self.app.mouse)
+        draw_panel(canvas, skip, (24, 38, 64, 220) if hovered else (14, 24, 46, 210),
+                   palette["accent"] if hovered else palette["border"], 10, 2 if hovered else 1)
+        draw_text(canvas, self.resources, tr(self.language, "upgrade_skip"), 16,
+                  palette["text"], skip.center, anchor="center")
+        draw_text(canvas, self.resources, tr(self.language, "upgrade_hint"), 12,
+                  palette["muted"], (cx, skip.bottom + 18), anchor="center")
 
     def _draw_pause(self, canvas):
         palette = self.palette
@@ -1067,7 +1397,8 @@ class GameProcess:
                   shadow=(2, 5, 14))
         draw_text(canvas, self.resources,
                   f"{tr(self.language, 'score')}: {format_score(self.score)}   ·   "
-                  f"{tr(self.language, 'wave')}: {self.wave}",
+                  f"{tr(self.language, 'wave')}: {self.wave}   ·   "
+                  f"{tr(self.language, 'salvage')}: {self.salvage}",
                   17, palette["text"], (cx, panel_top + 92), anchor="center")
         draw_text(canvas, self.resources, tr(self.language, "focus_hint"), 11,
                   palette["muted"], (cx, panel_top + 116), anchor="center")
@@ -1104,7 +1435,7 @@ class GameProcess:
                   palette["muted"], (cx, panel_top + 112), anchor="center")
         draw_text(canvas, self.resources, format_score(result["score"]), 52,
                   palette["warning"], (cx, panel_top + 132), anchor="midtop",
-                  kind="title", shadow=(2, 6, 16))
+                  shadow=(2, 6, 16))
 
         if result.get("is_new"):
             text = tr(self.language, "new_record_meme" if self.mode == "meme" else "new_record")
@@ -1122,9 +1453,13 @@ class GameProcess:
         )
         draw_text(canvas, self.resources, stats, 15, palette["text"],
                   (cx, panel_top + 244), anchor="center")
+        if result.get("salvage") is not None:
+            draw_text(canvas, self.resources,
+                      f"{tr(self.language, 'salvage')}  {result['salvage']}", 13,
+                      palette["muted"], (cx, panel_top + 266), anchor="center")
         if result.get("rank"):
             draw_text(canvas, self.resources, f"{tr(self.language, 'rank')} {result['rank']}",
-                      14, palette["accent"], (cx, panel_top + 270), anchor="center")
+                      14, palette["accent"], (cx, panel_top + 282), anchor="center")
 
         self.over_group.draw(canvas, self.resources, palette)
         draw_text(canvas, self.resources,
