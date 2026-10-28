@@ -268,6 +268,14 @@ class CoopTestCase(unittest.TestCase):
 
 
 class CoopHostTests(CoopTestCase):
+    def test_tiger_state_is_in_authoritative_snapshot(self):
+        game = self.make_coop(mode="meme")
+        self.assertTrue(game._spawn_tiger_powerup())
+        game._collect_powerup(game.powerups[-1], game.player)
+        snapshot = build_snapshot(game, ("Host", "Pilot"))
+        self.assertEqual(snapshot["tiger"]["phase"], "freeze")
+        self.assertEqual(snapshot["tiger"]["elapsed"], 0.0)
+
     def test_snapshot_is_json_safe_and_has_two_players(self):
         game = self.make_coop()
         game.state = "playing"
@@ -437,6 +445,36 @@ class CoopHostTests(CoopTestCase):
 
 
 class CoopClientTests(CoopTestCase):
+    def test_client_mirrors_host_tiger_phase_without_world_authority(self):
+        scene, _session = self.make_scene()
+        snapshot = self.build_live_snapshot()
+        snapshot["mode"] = "meme"
+        snapshot["tiger"] = {
+            "phase": "claw_strike", "elapsed": 4.1,
+            "phase_time": .12, "struck": True,
+        }
+        scene._apply_snapshot(snapshot)
+        self.assertTrue(scene.tiger_ultimate.active)
+        self.assertEqual(scene.tiger_ultimate.phase, "claw_strike")
+        self.assertEqual(scene.tiger_ultimate.elapsed, 4.1)
+        self.assertTrue(scene.tiger_ultimate.struck)
+        self.assertTrue(scene.tiger_ultimate.particles)
+        scene.draw(self.app.canvas)
+        self.assertFalse(isinstance(scene, GameProcess))
+
+    def test_disconnect_cleans_up_client_tiger_state(self):
+        scene, _session = self.make_scene()
+        snapshot = self.build_live_snapshot()
+        snapshot["mode"] = "meme"
+        snapshot["tiger"] = {
+            "phase": "reveal", "elapsed": .6,
+            "phase_time": .25, "struck": False,
+        }
+        scene._apply_snapshot(snapshot)
+        scene._disconnect("test disconnect")
+        self.assertFalse(scene.tiger_ultimate.active)
+        self.assertEqual(scene.state, "disconnected")
+
     def make_scene(self, messages=None):
         session = FakeClientSession(messages)
         scene = CoopClientScene(self.app, session, {

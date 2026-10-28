@@ -147,6 +147,8 @@ plays, then performs an animated claw strike that clears ordinary enemies and
 hostile projectiles. The clip is preprocessed into transparent PNG frames with
 `python tools/preprocess_tiger.py --contains-title` (requires optional
 `opencv-python-headless`). The source media contents remain unchanged.
+In co-op the host decides pickup and screen-clear results; it sends only the
+cinematic phase and timing, while both clients play their local frame sequence.
 The drop chance is 8% per eligible enemy drop event, with an 18-second
 cooldown. The cinematic phases are freeze (0.35 s), reveal (2.70 s), claw
 windup (0.65 s), strike (0.72 s), clear (0.25 s), then a 1.25-second return

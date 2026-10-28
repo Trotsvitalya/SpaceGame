@@ -95,6 +95,12 @@ def build_snapshot(game, names):
         "zones": [],
         "beams": [],
         "announce": None,
+        "tiger": ({
+            "phase": game.tiger_ultimate.phase,
+            "elapsed": round(game.tiger_ultimate.elapsed, 3),
+            "phase_time": round(game.tiger_ultimate.phase_time, 3),
+            "struck": bool(game.tiger_ultimate.struck),
+        } if game.tiger_ultimate.active else None),
         "story": story,
         "upgrade": None,
         "result": (game.campaign_result if state == "victory"
@@ -283,7 +289,7 @@ class CoopHostGame(GameProcess):
             self.overlay_time += dt
             return
         super().update(dt)
-        if self.state in ("playing", "dying"):
+        if self.state in ("playing", "dying") and not self.tiger_ultimate.active:
             self._update_revives(dt)
             if self.wave != self._last_wave:
                 self._last_wave = self.wave
@@ -320,6 +326,10 @@ class CoopHostGame(GameProcess):
         if self.peer_left:
             return
         self.peer_left = True
+        if self.tiger_ultimate.active:
+            self.tiger_ultimate.cancel()
+            self.audio.stop_tiger_ultimate()
+            self.audio.resume_music()
         self.disconnect_reason = (reason or "partner disconnected")[:80]
         if self.state in ("playing", "story", "paused", "upgrade", "dying"):
             self._state_before_disconnect = self.state

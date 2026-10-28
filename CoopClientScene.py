@@ -20,6 +20,7 @@ from Localization import tr
 from PowerUpClass import PowerUp
 from ResourcesClass import palette_for
 from SpaceBackdrop import SpaceBackdrop
+from TigerUltimate import TigerUltimate
 from UIClass import draw_bar, draw_panel, draw_text
 from utils import VH, VW, clamp, format_score, format_time
 
@@ -81,12 +82,18 @@ class CoopClientScene:
         self._last_state = "waiting"
         self._overlay_buttons = []
         self._music_stopped = False
+        self.tiger_ultimate = TigerUltimate()
+        self._tiger_paused = False
+        self._tiger_resume_pending = False
 
     # ------------------------------------------------------------ lifecycle
     def on_enter(self):
         self.audio.play_music("game", self.mode)
 
     def on_exit(self):
+        self.tiger_ultimate.cancel()
+        self.tiger_ultimate.close()
+        self.audio.stop_tiger_ultimate()
         self.audio.stop_music()
         self._close_session()
 
@@ -128,15 +135,23 @@ class CoopClientScene:
     # --------------------------------------------------------------- update
     def update(self, dt):
         dt = clamp(dt, 0.0, 0.1)
-        self.time += dt
-        self.overlay_time += dt
-        self.pause_hint = max(0.0, self.pause_hint - dt)
-        self.backdrop.update(dt, 0.4)
         self._poll_network()
         if self.net is not None:
             move_x, move_y, firing = self._read_local_input()
             self.net.send_input(move_x, move_y, firing)
             self.net.heartbeat()
+        if self.tiger_ultimate.active:
+            if self.state != "paused":
+                self.tiger_ultimate._update_particles(dt)
+            return
+        if (self._tiger_resume_pending
+                and not self.audio.tiger_ultimate_busy()):
+            self.audio.resume_music()
+            self._tiger_resume_pending = False
+        self.time += dt
+        self.overlay_time += dt
+        self.pause_hint = max(0.0, self.pause_hint - dt)
+        self.backdrop.update(dt, 0.4)
         if self.state not in ("victory", "gameover", "disconnected"):
             if time.monotonic() - self.snapshot_time > SNAPSHOT_STALE:
                 self._disconnect(tr(self.language, "coop_link_lost"))
@@ -180,6 +195,7 @@ class CoopClientScene:
         if state in ("playing", "dying", "story", "paused", "upgrade",
                      "victory", "gameover", "waiting"):
             self._set_state(state)
+        self._sync_tiger(snapshot.get("tiger"), snapshot.get("mode"))
         if snapshot.get("result") and not self.result:
             self.result = snapshot["result"]
         story = snapshot.get("story")
@@ -188,6 +204,42 @@ class CoopClientScene:
             if key != self.story_key:
                 self.story_key = key
                 self.audio.play("ui_click", 0.35, throttle_ms=180)
+
+    def _sync_tiger(self, tiger, mode):
+        active = (mode == "meme" and isinstance(tiger, dict)
+                  and tiger.get("phase") in {
+                      name for name, _duration in TigerUltimate.PHASES
+                  })
+        if active and not self.tiger_ultimate.active:
+            self.tiger_ultimate.start()
+            self.audio.pause_music()
+            self.audio.play_tiger_ultimate()
+            self._tiger_resume_pending = False
+            self._tiger_paused = False
+        elif not active and self.tiger_ultimate.active:
+            self.tiger_ultimate.cancel()
+            self._tiger_resume_pending = True
+            self._tiger_paused = False
+
+        if active:
+            old_phase = self.tiger_ultimate.phase
+            new_phase = tiger["phase"]
+            if new_phase == "claw_strike" and old_phase != "claw_strike":
+                self.tiger_ultimate._burst()
+            self.tiger_ultimate.phase = new_phase
+            try:
+                self.tiger_ultimate.elapsed = max(0.0, min(
+                    30.0, float(tiger.get("elapsed", 0.0))))
+                self.tiger_ultimate.phase_time = max(0.0, min(
+                    10.0, float(tiger.get("phase_time", 0.0))))
+            except (TypeError, ValueError):
+                self.tiger_ultimate.elapsed = self.tiger_ultimate.phase_time = 0.0
+            self.tiger_ultimate.struck = bool(tiger.get("struck", False))
+            paused = self.state == "paused"
+            if paused != self._tiger_paused:
+                (self.audio.pause_tiger_ultimate() if paused else
+                 self.audio.resume_tiger_ultimate())
+                self._tiger_paused = paused
 
     def _apply_result(self, result):
         self.result = result
@@ -219,6 +271,11 @@ class CoopClientScene:
             # not replace the result screen.
             return
         self.disconnect_reason = str(reason or tr(self.language, "coop_link_lost"))[:120]
+        if self.tiger_ultimate.active:
+            self.tiger_ultimate.cancel()
+            self.audio.stop_tiger_ultimate()
+            self.audio.resume_music()
+            self._tiger_resume_pending = False
         self._set_state("disconnected")
         self.audio.stop_music()
         self.audio.play("low_health", 0.8)
@@ -312,6 +369,12 @@ class CoopClientScene:
         canvas.blit(self.resources.vignette, (0, 0))
         if snapshot is not None:
             self._draw_hud(canvas, snapshot)
+        if self.tiger_ultimate.active:
+            self.tiger_ultimate.draw(
+                canvas, getattr(self.settings, "reduced_flash", False),
+                getattr(self.settings, "effects_quality", 2), self.language)
+            if self.tiger_ultimate.phase == "return" and snapshot is not None:
+                self._draw_hud(canvas, snapshot)
 
         if self.state == "waiting":
             self._draw_waiting(canvas)
