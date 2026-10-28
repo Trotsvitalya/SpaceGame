@@ -14,6 +14,7 @@ import pygame
 
 from BulletClass import Bullet, EnemyBullet
 from Balance import Balance, BalanceMetrics
+from CampaignData import mission_by_id
 from EffectsClass import Effects, ScreenShake
 from EnemyAsteroidClass import BossEnemy, EnemyAsteroid, EnemyShip
 from GameData import (SHIPS, UPGRADES, UPGRADE_ORDER, WEAPONS, ZONES,
@@ -46,7 +47,8 @@ class GameProcess:
         "elite": 6,
     }
 
-    def __init__(self, app, mode="normal", difficulty=None):
+    def __init__(self, app, mode="normal", difficulty=None, mission=None,
+                 progress=None):
         self.app = app
         self.mode = mode if mode in ("normal", "meme") else "normal"
         self.settings = app.settings
@@ -59,9 +61,23 @@ class GameProcess:
         self.balance = Balance(self.difficulty)
         self.metrics = BalanceMetrics()
 
+        # A campaign mission is a plain data dict from CampaignData.  It only
+        # changes the wave plan, enemy pool and win condition; every combat
+        # system below is shared with endless mode.
+        self.campaign_mission = mission if isinstance(mission, dict) else None
+        self.campaign = self.campaign_mission is not None
+        self.campaign_progress = progress if self.campaign else None
+        self.campaign_result = None
+        self.story_keys = (tuple(self.campaign_mission.get("story", ()))
+                           if self.campaign else ())
+        self.story_index = 0
+        self.story_time = 0.0
+
         self.world = pygame.Surface((VW, VH)).convert()
+        start_zone = (self.campaign_mission["zone"] if self.campaign
+                      else zone_index_for_wave(1))
         self.backdrop = SpaceBackdrop(
-            self.resources, self.mode, zone=zone_index_for_wave(1),
+            self.resources, self.mode, zone=start_zone,
             seed=random.randint(1, 99999),
             quality=getattr(self.settings, "effects_quality", 2),
         )
@@ -92,10 +108,14 @@ class GameProcess:
         self.score = 0.0
         self.display_score = 0.0
         self.kills = 0
-        self.salvage = 0
+        self.salvage = (self.campaign_progress.salvage_bonus
+                        if self.campaign else 0)
         self.wave = 1
         self.game_time = 0.0
         self.best_before = app.leaderboard.best(self.mode)
+        if self.campaign and self.campaign_progress is not None:
+            best = self.campaign_progress.best_for(self.campaign_mission["id"])
+            self.best_before = int(best.get("score", 0)) if best else 0
         self.result = None
 
         self.spawn_timer = 1.15
@@ -112,6 +132,7 @@ class GameProcess:
         self.overlay_time = 0.0
         self.pause_group = None
         self.over_group = None
+        self.victory_group = None
         self.announce_text = None
         self.announce_sub = None
         self.announce_color = self.palette["accent"]
@@ -133,6 +154,15 @@ class GameProcess:
         self._announce(tr(self.language, "wave_announce", wave=self.wave),
                        self.palette["accent"], 2.4)
 
+        if self.campaign and self.story_keys:
+            self.state = "story"
+
+    @property
+    def total_waves(self):
+        if self.campaign:
+            return max(1, int(self.campaign_mission.get("waves", 1)))
+        return None
+
     # ------------------------------------------------------------ lifecycle
     def on_enter(self):
         self.audio.play_music("game", self.mode)
@@ -143,11 +173,18 @@ class GameProcess:
 
     def _restart(self):
         self.audio.play("ui_click", 0.5)
-        self.app.start_game(self.mode)
+        if self.campaign:
+            self.app.start_campaign(self.campaign_mission["id"], self.mode,
+                                    self.difficulty)
+        else:
+            self.app.start_game(self.mode)
 
     def _to_menu(self):
         self.audio.play("ui_click", 0.5)
-        self.app.go_menu()
+        if self.campaign:
+            self.app.go_campaign()
+        else:
+            self.app.go_menu()
 
     def _handle_action(self, action):
         if not action:
@@ -157,7 +194,24 @@ class GameProcess:
         elif action == "restart":
             self._restart()
         elif action == "menu":
-            self._to_menu()
+            if self.campaign:
+                self.app.go_campaign()
+            else:
+                self._to_menu()
+        elif action == "campaign_menu":
+            self.audio.play("ui_click", 0.5)
+            self.app.go_campaign()
+        elif action == "campaign_main":
+            self.audio.play("ui_click", 0.5)
+            self.app.go_menu()
+        elif action == "campaign_next":
+            summary = self.campaign_result or {}
+            next_id = summary.get("next_mission")
+            if next_id:
+                self.audio.play("ui_click", 0.5)
+                self.app.start_campaign(next_id, self.mode, self.difficulty)
+        elif action == "campaign_replay":
+            self._restart()
 
     # ---------------------------------------------------------------- input
     def handle_event(self, event, mouse=None):
@@ -172,6 +226,10 @@ class GameProcess:
                 and getattr(self.settings, "auto_pause", True)):
             if self.state == "playing":
                 self._pause()
+            return
+
+        if self.state == "story":
+            self._handle_story_event(event, mouse)
             return
 
         if self.state == "upgrade":
@@ -190,6 +248,21 @@ class GameProcess:
                     self._to_menu()
                     return
             action = self.pause_group.handle_event(event, mouse) if self.pause_group else None
+            self._handle_action(action)
+            return
+
+        if self.state == "victory":
+            if event.type == pygame.KEYDOWN:
+                if event.key in (pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_n):
+                    self._handle_action("campaign_next")
+                    return
+                if event.key == pygame.K_r:
+                    self._restart()
+                    return
+                if event.key in (pygame.K_ESCAPE, pygame.K_m):
+                    self.app.go_campaign()
+                    return
+            action = self.victory_group.handle_event(event, mouse) if self.victory_group else None
             self._handle_action(action)
             return
 
@@ -385,6 +458,45 @@ class GameProcess:
         if self.info_timer > 0:
             self.info_timer = max(0.0, self.info_timer - dt)
 
+    # ---------------------------------------------------------------- story
+    def _handle_story_event(self, event, mouse):
+        if event.type == pygame.KEYDOWN:
+            if event.key in (pygame.K_s, pygame.K_ESCAPE):
+                self._skip_story()
+            elif event.key in (pygame.K_RETURN, pygame.K_KP_ENTER,
+                               pygame.K_SPACE, pygame.K_RIGHT, pygame.K_d):
+                self._advance_story()
+        elif event.type == pygame.MOUSEBUTTONUP and event.button == 1:
+            self._advance_story()
+
+    def _advance_story(self):
+        self.story_index += 1
+        self.story_time = 0.0
+        if self.story_index >= len(self.story_keys):
+            self._end_story()
+        else:
+            self.audio.play("ui_click", 0.4)
+
+    def _skip_story(self):
+        self.audio.play("ui_click", 0.5)
+        self._end_story()
+
+    def _end_story(self):
+        if self.state != "story":
+            return
+        self.state = "playing"
+        self.story_index = len(self.story_keys)
+        mission = self.campaign_mission or {}
+        if mission.get("boss"):
+            objective = tr(self.language, "mission_objective_boss",
+                           waves=self.total_waves)
+        else:
+            objective = tr(self.language, "mission_objective_survive",
+                           waves=self.total_waves)
+        self._announce(tr(self.language, mission.get("name_key", "campaign_title")),
+                       self.palette["accent"], 3.0, sub=objective)
+        self.audio.play("wave", 0.7)
+
     def _update_waves(self, dt):
         if self.boss is not None:
             return
@@ -393,6 +505,32 @@ class GameProcess:
             return
         self.wave_timer = 0.0
         self.metrics.note_wave(self.wave, self.WAVE_DURATION)
+
+        if self.campaign:
+            mission = self.campaign_mission
+            if self.wave >= self.total_waves:
+                if mission.get("boss"):
+                    self._spawn_boss()
+                else:
+                    self._complete_mission()
+                return
+            self.wave += 1
+            self._announce(
+                tr(self.language, "wave_announce", wave=self.wave),
+                self.palette["accent"], 2.4,
+                sub=tr(self.language, mission["name_key"]),
+            )
+            self.audio.play("wave", 0.6)
+            start_kind = ("shield" if self.player.life <= 1 else
+                          random.choice(("weapon", "shield", "rapid")))
+            self._spawn_powerup(
+                random.uniform(160, VW - 160), 120, start_kind,
+            )
+            # Campaign missions are short, so every cleared wave offers an
+            # upgrade instead of every third endless wave.
+            self._open_upgrade()
+            return
+
         self.wave += 1
         self._sync_zone(announce=True)
         if self.wave % 5 == 0:
@@ -414,6 +552,8 @@ class GameProcess:
             self._open_upgrade()
 
     def _sync_zone(self, announce=False):
+        if self.campaign:
+            return
         index = zone_index_for_wave(self.wave)
         zone = ZONES[index]
         if zone["id"] == self.zone_id:
@@ -443,6 +583,10 @@ class GameProcess:
         self.effects.update(dt * (0.55 if self.state == "gameover" else 1.0))
         self._update_hazards(dt * time_scale)
 
+        if self.state == "story":
+            self.story_time += dt
+            self._update_announcements(dt)
+            return
         if self.state == "upgrade":
             self._update_announcements(dt)
             return
@@ -484,6 +628,24 @@ class GameProcess:
         if self.boss is not None or len(self.enemies) >= self.MAX_ENEMIES:
             return
         roll = random.random()
+        if self.campaign:
+            mission = self.campaign_mission
+            pool = [kind for kind in mission.get("enemies", ("scout",))
+                    if kind != "asteroid"]
+            if not pool:
+                pool = ["scout"]
+            elite_cap = max(0, int(mission.get("max_elites", 1)))
+            elites = sum(1 for enemy in self.enemies
+                         if getattr(enemy, "kind", "") == "elite")
+            if elites >= elite_cap:
+                pool = [kind for kind in pool if kind != "elite"] or ["scout"]
+            ratio = clamp(float(mission.get("asteroid_ratio", 0.3)), 0.0, 1.0)
+            kind = "asteroid" if roll < ratio else random.choice(pool)
+            if kind == "asteroid":
+                self._spawn_asteroid()
+            else:
+                self._spawn_ship(kind)
+            return
         zone = zone_for_wave(self.wave)
         if self.wave <= 1:
             kind = "asteroid"
@@ -554,9 +716,20 @@ class GameProcess:
         self.enemy_bullets.clear()
         self.danger_zones.clear()
         self.beams.clear()
-        self.boss = BossEnemy(self.mode, self.resources, self.wave,
-                              kind=boss_kind_for_wave(self.wave),
-                              balance=self.balance)
+        if self.campaign:
+            mission = self.campaign_mission
+            kind = mission.get("boss") or boss_kind_for_wave(self.wave)
+            boss_wave = int(mission.get("boss_wave", self.wave))
+            self.boss = BossEnemy(self.mode, self.resources, boss_wave,
+                                  kind=kind, balance=self.balance)
+            scale = max(0.25, float(mission.get("boss_scale", 1.0)))
+            if abs(scale - 1.0) > 1e-6:
+                self.boss.max_hp = max(1, int(round(self.boss.max_hp * scale)))
+                self.boss.hp = self.boss.max_hp
+        else:
+            self.boss = BossEnemy(self.mode, self.resources, self.wave,
+                                  kind=boss_kind_for_wave(self.wave),
+                                  balance=self.balance)
         self.metrics.note_boss()
         self.boss_drop_flags = {0.66: False, 0.33: False}
         warning_key = ("boss_warning_sentinel" if self.boss.kind == "sentinel"
@@ -891,6 +1064,10 @@ class GameProcess:
                 self.player.heal()
         self.spawn_grace = self.balance.post_boss_grace
         self.spawn_timer = self.spawn_grace
+        if self.campaign:
+            self.boss = None
+            self._complete_mission()
+            return
         self.boss = None
         self.wave += 1
         self.wave_timer = 0.0
@@ -899,6 +1076,78 @@ class GameProcess:
                        sub=tr(self.language, "wave_announce", wave=self.wave))
         self.audio.play("wave", 0.9)
         self._open_upgrade()
+
+    def _complete_mission(self):
+        """Finish the current campaign mission and persist its rewards."""
+        if not self.campaign or self.state in ("victory", "gameover"):
+            return
+        mission = self.campaign_mission
+        mission_id = mission["id"]
+        summary = {
+            "first_completion": False,
+            "next_mission": None,
+            "salvage_bonus": 0,
+            "best": None,
+        }
+        if self.campaign_progress is not None:
+            summary = self.campaign_progress.complete_mission(
+                mission_id,
+                score=int(self.score),
+                kills=self.kills,
+                time=self.game_time,
+                reward=int(mission.get("reward_salvage", 0)),
+            )
+        campaign_complete = bool(
+            self.campaign_progress is not None
+            and self.campaign_progress.completed_count()
+            >= self.campaign_progress.total_count()
+        )
+        self.state = "victory"
+        self.overlay_time = 0.0
+        self.announce_timer = 0.0
+        self.announce_text = None
+        self.taunt_timer = 0.0
+        self.info_timer = 0.0
+        self.danger_zones.clear()
+        self.beams.clear()
+        self.enemy_bullets.clear()
+        self.campaign_result = {
+            "mission": mission,
+            "score": int(self.score),
+            "kills": self.kills,
+            "time": self.game_time,
+            "summary": summary,
+            "campaign_complete": campaign_complete,
+        }
+        self.audio.stop_music()
+        self.audio.play("wave", 0.9)
+        self.audio.play("upgrade_apply", 0.7)
+        self._build_victory_widgets(summary, campaign_complete)
+
+    def _build_victory_widgets(self, summary, campaign_complete):
+        cx = VW // 2
+        panel_top = VH // 2 - 250
+        widgets = []
+        next_id = summary.get("next_mission")
+        if next_id and not campaign_complete:
+            widgets.append(Button((cx - 170, panel_top + 352, 340, 46),
+                                  tr(self.language, "campaign_next"),
+                                  "campaign_next", size=19))
+            widgets.append(Button((cx - 170, panel_top + 406, 340, 42),
+                                  tr(self.language, "campaign_replay"),
+                                  "campaign_replay", size=17))
+        else:
+            offset = 430 if campaign_complete else 352
+            widgets.append(Button((cx - 170, panel_top + offset, 340, 46),
+                                  tr(self.language, "campaign_back"),
+                                  "campaign_menu", size=19))
+            widgets.append(Button((cx - 170, panel_top + offset + 54, 340, 42),
+                                  tr(self.language, "campaign_menu"),
+                                  "campaign_main", size=17))
+        self.victory_group = WidgetGroup(
+            widgets, on_hover=lambda: self.audio.play("ui_hover", 0.4)
+        )
+
 
     def _clear_enemy_bullets_near(self, x, y, radius):
         for bullet in self.enemy_bullets:
@@ -1111,10 +1360,11 @@ class GameProcess:
     def _build_pause_widgets(self):
         cx = VW // 2
         panel_top = VH // 2 - 190
+        menu_label = ("campaign_back" if self.campaign else "main_menu")
         widgets = [
             Button((cx - 150, panel_top + 190, 300, 48), tr(self.language, "resume"), "resume"),
             Button((cx - 150, panel_top + 250, 300, 48), tr(self.language, "restart"), "restart"),
-            Button((cx - 150, panel_top + 310, 300, 48), tr(self.language, "main_menu"), "menu"),
+            Button((cx - 150, panel_top + 310, 300, 48), tr(self.language, menu_label), "menu"),
         ]
         self.pause_group = WidgetGroup(widgets, on_hover=lambda: self.audio.play("ui_hover", 0.4))
 
@@ -1129,6 +1379,23 @@ class GameProcess:
         self.info_timer = 0.0
         self.audio.stop_music()
         self.audio.play("gameover" if self.mode == "normal" else "meme_gameover", 0.85)
+        if self.campaign:
+            # Campaign failures never touch the endless leaderboard.
+            self.result = {
+                "score": int(self.score),
+                "wave": self.wave,
+                "kills": self.kills,
+                "time": self.game_time,
+                "rank": 0,
+                "is_new": False,
+                "best_before": 0,
+                "best": 0,
+                "salvage": self.salvage,
+                "campaign": True,
+                "mission": self.campaign_mission,
+            }
+            self._build_gameover_widgets()
+            return
         rank, is_new, best_before = self.app.leaderboard.add(
             self.mode, int(self.score), self.wave, self.kills
         )
@@ -1148,6 +1415,19 @@ class GameProcess:
     def _build_gameover_widgets(self):
         cx = VW // 2
         panel_top = VH // 2 - 235
+        if self.campaign:
+            widgets = [
+                Button((cx - 150, panel_top + 330, 300, 46),
+                       tr(self.language, "campaign_retry"), "campaign_replay"),
+                Button((cx - 150, panel_top + 386, 300, 46),
+                       tr(self.language, "campaign_back"), "campaign_menu"),
+                Button((cx - 110, panel_top + 442, 220, 38),
+                       tr(self.language, "campaign_menu"), "campaign_main", size=17),
+            ]
+            self.over_group = WidgetGroup(
+                widgets, on_hover=lambda: self.audio.play("ui_hover", 0.4)
+            )
+            return
         widgets = [
             Button((cx - 150, panel_top + 330, 300, 46),
                    tr(self.language, "restart"), "restart"),
@@ -1166,16 +1446,20 @@ class GameProcess:
         canvas.blit(self.world, (offset_x, offset_y))
         self.effects.draw_flash(canvas)
         canvas.blit(self.resources.vignette, (0, 0))
-        if self.state != "upgrade":
+        if self.state not in ("upgrade", "story", "victory"):
             self._draw_hud(canvas)
         if self.state == "dying":
             overlay = pygame.Surface((VW, VH), pygame.SRCALPHA)
             overlay.fill((80, 10, 20, 45))
             canvas.blit(overlay, (0, 0))
+        elif self.state == "story":
+            self._draw_story(canvas)
         elif self.state == "paused":
             self._draw_pause(canvas)
         elif self.state == "upgrade":
             self._draw_upgrade(canvas)
+        elif self.state == "victory":
+            self._draw_victory(canvas)
         elif self.state == "gameover":
             self._draw_gameover(canvas)
 
@@ -1216,7 +1500,11 @@ class GameProcess:
 
     def _draw_hud(self, canvas):
         palette = self.palette
-        zone = zone_for_wave(self.wave)
+        if self.campaign:
+            zone = ZONES[max(0, min(len(ZONES) - 1,
+                                    self.campaign_mission.get("zone", 0)))]
+        else:
+            zone = zone_for_wave(self.wave)
         top = pygame.Rect(18, 12, VW - 36, 60)
         draw_panel(canvas, top, (*palette["panel"], 210), palette["border"], 12, 1)
 
@@ -1232,15 +1520,37 @@ class GameProcess:
                   zone["accent"], (240, 48))
 
         # Wave + zone + progress.
-        wave_label = tr(self.language, "meme_wave" if self.mode == "meme" else "wave")
-        draw_text(canvas, self.resources, wave_label, 11, palette["muted"],
-                  (VW // 2, 20), anchor="midtop")
-        draw_text(canvas, self.resources, f"{self.wave:02d}", 23, palette["text"],
-                  (VW // 2, 30), anchor="midtop")
-        if self.boss is None:
-            progress = clamp(self.wave_timer / self.WAVE_DURATION, 0.0, 1.0)
-            draw_bar(canvas, (VW // 2 - 70, 59, 140, 3), progress,
-                     palette["accent2"], (28, 34, 54), None, 1)
+        if self.campaign:
+            mission = self.campaign_mission
+            draw_text(canvas, self.resources,
+                      tr(self.language, mission.get("name_key", "campaign_title")),
+                      11, palette["muted"], (VW // 2, 18), anchor="midtop")
+            draw_text(canvas, self.resources,
+                      f"{self.wave:02d} / {self.total_waves:02d}", 21,
+                      palette["text"], (VW // 2, 31), anchor="midtop")
+            if self.boss is None:
+                progress = clamp(self.wave_timer / self.WAVE_DURATION, 0.0, 1.0)
+                draw_bar(canvas, (VW // 2 - 70, 59, 140, 3), progress,
+                         palette["accent2"], (28, 34, 54), None, 1)
+            if self.boss is None:
+                if mission.get("boss"):
+                    objective = tr(self.language, "mission_objective_boss",
+                                   waves=self.total_waves)
+                else:
+                    objective = tr(self.language, "mission_objective_survive",
+                                   waves=self.total_waves)
+                draw_text(canvas, self.resources, objective, 9, palette["muted"],
+                          (VW // 2, 76), anchor="midtop")
+        else:
+            wave_label = tr(self.language, "meme_wave" if self.mode == "meme" else "wave")
+            draw_text(canvas, self.resources, wave_label, 11, palette["muted"],
+                      (VW // 2, 20), anchor="midtop")
+            draw_text(canvas, self.resources, f"{self.wave:02d}", 23, palette["text"],
+                      (VW // 2, 30), anchor="midtop")
+            if self.boss is None:
+                progress = clamp(self.wave_timer / self.WAVE_DURATION, 0.0, 1.0)
+                draw_bar(canvas, (VW // 2 - 70, 59, 140, 3), progress,
+                         palette["accent2"], (28, 34, 54), None, 1)
 
         # Lives.
         lives_label = tr(self.language, "meme_lives" if self.mode == "meme" else "lives")
@@ -1442,6 +1752,38 @@ class GameProcess:
         draw_text(canvas, self.resources, tr(self.language, "upgrade_hint"), 12,
                   palette["muted"], (cx, skip.bottom + 18), anchor="center")
 
+    def _draw_story(self, canvas):
+        palette = self.palette
+        overlay = pygame.Surface((VW, VH), pygame.SRCALPHA)
+        overlay.fill((4, 6, 16, 224))
+        canvas.blit(overlay, (0, 0))
+        cx = VW // 2
+        panel = pygame.Rect(cx - 390, VH // 2 - 196, 780, 392)
+        draw_panel(canvas, panel, (*palette["panel"], 245),
+                   palette["accent"], 18, 2)
+        mission = self.campaign_mission or {}
+        draw_text(canvas, self.resources,
+                  tr(self.language, "campaign_story"), 13, palette["muted"],
+                  (panel.x + 34, panel.y + 24))
+        draw_text(canvas, self.resources,
+                  tr(self.language, mission.get("name_key", "campaign_title")),
+                  28, palette["accent"], (panel.x + 34, panel.y + 44),
+                  shadow=(2, 5, 14))
+        index = min(self.story_index, max(0, len(self.story_keys) - 1))
+        key = self.story_keys[index] if self.story_keys else "campaign_title"
+        lines = self.resources.wrap_text(
+            tr(self.language, key), 19, panel.width - 72
+        )
+        for line_index, line in enumerate(lines[:8]):
+            draw_text(canvas, self.resources, line, 19, palette["text"],
+                      (panel.x + 36, panel.y + 108 + line_index * 27))
+        draw_text(canvas, self.resources,
+                  f"{index + 1} / {max(1, len(self.story_keys))}", 12,
+                  palette["muted"], (panel.right - 34, panel.y + 28),
+                  anchor="topright")
+        draw_text(canvas, self.resources, tr(self.language, "story_next_hint"), 12,
+                  palette["muted"], (cx, panel.bottom - 26), anchor="center")
+
     def _draw_pause(self, canvas):
         palette = self.palette
         overlay = pygame.Surface((VW, VH), pygame.SRCALPHA)
@@ -1465,6 +1807,88 @@ class GameProcess:
         draw_text(canvas, self.resources, "ESC / P — " + tr(self.language, "resume"),
                   12, palette["muted"], (cx, panel.bottom - 24), anchor="center")
 
+    def _draw_victory(self, canvas):
+        palette = self.palette
+        fade = min(1.0, self.overlay_time * 2.6)
+        overlay = pygame.Surface((VW, VH), pygame.SRCALPHA)
+        overlay.fill((4, 5, 14, int(205 * fade)))
+        canvas.blit(overlay, (0, 0))
+        cx = VW // 2
+        result = self.campaign_result or {}
+        summary = result.get("summary", {})
+        mission = result.get("mission") or self.campaign_mission or {}
+        campaign_complete = bool(result.get("campaign_complete"))
+        panel_top = VH // 2 - 250
+        panel = pygame.Rect(cx - 360, panel_top, 720, 590)
+        accent = palette["success"] if not campaign_complete else palette["warning"]
+        draw_panel(canvas, panel, (*palette["panel"], int(245 * fade)),
+                   accent, 18, 2)
+
+        title = ("campaign_complete" if campaign_complete else "mission_complete")
+        draw_text(canvas, self.resources, tr(self.language, title), 44, accent,
+                  (cx, panel_top + 44), anchor="center", shadow=(2, 6, 16))
+        draw_text(canvas, self.resources,
+                  tr(self.language, mission.get("name_key", "campaign_title")),
+                  22, palette["text"], (cx, panel_top + 90), anchor="center")
+
+        draw_text(canvas, self.resources, tr(self.language, "final_score"), 13,
+                  palette["muted"], (cx, panel_top + 122), anchor="center")
+        draw_text(canvas, self.resources, format_score(result.get("score", 0)), 50,
+                  palette["warning"], (cx, panel_top + 140), anchor="midtop",
+                  shadow=(2, 6, 16))
+        stats = (
+            f"{tr(self.language, 'kills')}  {result.get('kills', 0)}     "
+            f"{tr(self.language, 'time')}  {format_time(result.get('time', 0.0))}"
+        )
+        draw_text(canvas, self.resources, stats, 15, palette["text"],
+                  (cx, panel_top + 202), anchor="center")
+
+        if campaign_complete:
+            hint_key = "campaign_complete_hint"
+            draw_text(canvas, self.resources, tr(self.language, hint_key), 16,
+                      palette["accent"], (cx, panel_top + 242), anchor="center")
+            lines = self.resources.wrap_text(
+                tr(self.language, "campaign_epilogue"), 15, panel.width - 110
+            )
+            for index, line in enumerate(lines[:4]):
+                draw_text(canvas, self.resources, line, 15, palette["text"],
+                          (cx, panel_top + 274 + index * 22), anchor="center",
+                          alpha=225)
+        else:
+            if summary.get("first_completion"):
+                reward = int(mission.get("reward_salvage", 0))
+                draw_text(canvas, self.resources,
+                          tr(self.language, "mission_reward_earned", salvage=reward),
+                          18, palette["warning"], (cx, panel_top + 236),
+                          anchor="center")
+            elif summary.get("best"):
+                best = summary["best"]
+                draw_text(canvas, self.resources,
+                          f"{tr(self.language, 'campaign_best')}  "
+                          f"{format_score(best.get('score', 0))}", 15,
+                          palette["muted"], (cx, panel_top + 236),
+                          anchor="center")
+            next_id = summary.get("next_mission")
+            if next_id:
+                next_mission = mission_by_id(next_id)
+                if next_mission:
+                    draw_text(canvas, self.resources,
+                              tr(self.language, "mission_unlocked",
+                                 name=tr(self.language, next_mission["name_key"])),
+                              14, palette["accent"], (cx, panel_top + 262),
+                              anchor="center")
+            if summary.get("salvage_bonus"):
+                draw_text(canvas, self.resources,
+                          f"{tr(self.language, 'campaign_bonus')}  "
+                          f"{summary['salvage_bonus']}", 13, palette["muted"],
+                          (cx, panel_top + 286), anchor="center")
+
+        if self.victory_group is not None:
+            self.victory_group.draw(canvas, self.resources, palette)
+        draw_text(canvas, self.resources, tr(self.language, "campaign_victory_hint"),
+                  12, palette["muted"], (cx, panel.bottom - 22), anchor="center",
+                  alpha=int(255 * fade))
+
     def _draw_gameover(self, canvas):
         palette = self.palette
         fade = min(1.0, self.overlay_time * 2.6)
@@ -1473,14 +1897,23 @@ class GameProcess:
         canvas.blit(overlay, (0, 0))
         cx = VW // 2
         panel_top = VH // 2 - 235
-        panel = pygame.Rect(cx - 320, panel_top, 640, 470)
+        panel = pygame.Rect(cx - 320, panel_top, 640,
+                            520 if self.campaign else 470)
         draw_panel(canvas, panel, (*palette["panel"], int(245 * fade)),
                    palette["danger"], 18, 2)
 
-        title = tr(self.language, "game_over")
-        draw_text(canvas, self.resources, title, 46, palette["danger"],
-                  (cx, panel_top + 46), anchor="center", shadow=(2, 6, 16), alpha=int(255 * fade))
-        if self.mode == "meme":
+        title = ("mission_failed" if self.campaign else "game_over")
+        draw_text(canvas, self.resources, tr(self.language, title), 44,
+                  palette["danger"], (cx, panel_top + 46), anchor="center",
+                  shadow=(2, 6, 16), alpha=int(255 * fade))
+        if self.campaign:
+            draw_text(canvas, self.resources,
+                      tr(self.language,
+                         (self.campaign_mission or {}).get("name_key",
+                                                          "campaign_title")),
+                      18, palette["text"], (cx, panel_top + 84), anchor="center",
+                      alpha=int(255 * fade))
+        elif self.mode == "meme":
             draw_text(canvas, self.resources, tr(self.language, "meme_game_over"), 15,
                       palette["accent2"], (cx, panel_top + 84), anchor="center",
                       alpha=int(255 * fade))
@@ -1496,14 +1929,15 @@ class GameProcess:
                   palette["warning"], (cx, panel_top + 132), anchor="midtop",
                   shadow=(2, 6, 16))
 
-        if result.get("is_new"):
-            text = tr(self.language, "new_record_meme" if self.mode == "meme" else "new_record")
-            color = palette["success"]
-        else:
-            text = f"{tr(self.language, 'best')}: {format_score(result.get('best', 0))}"
-            color = palette["muted"]
-        draw_text(canvas, self.resources, text, 17, color, (cx, panel_top + 208),
-                  anchor="center")
+        if not self.campaign:
+            if result.get("is_new"):
+                text = tr(self.language, "new_record_meme" if self.mode == "meme" else "new_record")
+                color = palette["success"]
+            else:
+                text = f"{tr(self.language, 'best')}: {format_score(result.get('best', 0))}"
+                color = palette["muted"]
+            draw_text(canvas, self.resources, text, 17, color, (cx, panel_top + 208),
+                      anchor="center")
 
         stats = (
             f"{tr(self.language, 'wave')}  {result['wave']}     "
@@ -1516,14 +1950,15 @@ class GameProcess:
             draw_text(canvas, self.resources,
                       f"{tr(self.language, 'salvage')}  {result['salvage']}", 13,
                       palette["muted"], (cx, panel_top + 266), anchor="center")
-        if result.get("rank"):
+        if result.get("rank") and not self.campaign:
             draw_text(canvas, self.resources, f"{tr(self.language, 'rank')} {result['rank']}",
                       14, palette["accent"], (cx, panel_top + 282), anchor="center")
 
         self.over_group.draw(canvas, self.resources, palette)
-        draw_text(canvas, self.resources,
-                  tr(self.language, "meme_press_enter_restart" if self.mode == "meme"
-                     else "press_enter_restart"),
+        hint_key = ("campaign_fail_hint" if self.campaign else
+                    ("meme_press_enter_restart" if self.mode == "meme"
+                     else "press_enter_restart"))
+        draw_text(canvas, self.resources, tr(self.language, hint_key),
                   12, palette["muted"], (cx, panel.bottom - 22), anchor="center",
                   alpha=int(255 * fade))
 

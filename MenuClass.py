@@ -13,6 +13,10 @@ import random
 import pygame
 
 from Balance import DIFFICULTY_ORDER
+from CampaignData import (MISSION_IDS, first_mission_id, mission_by_id,
+                          mission_name, mission_objective, mission_zone_name,
+                          next_mission_id)
+from CampaignProgress import CampaignProgress
 from EffectsClass import Effects
 from GameData import SHIPS, SHIP_ORDER, WEAPONS, ZONES
 from Localization import LANGUAGE_NAMES, tr
@@ -22,7 +26,8 @@ from UIClass import (Button, Choice, Slider, Toggle, WidgetGroup, draw_bar,
                      draw_panel, draw_text)
 from utils import VH, VW, clamp, format_score
 
-SCREENS = ("main", "mode", "hangar", "settings", "leaderboard", "controls")
+SCREENS = ("main", "mode", "hangar", "settings", "leaderboard", "controls",
+           "campaign", "campaign_brief")
 
 
 class MenuDeco:
@@ -103,6 +108,13 @@ class Menu:
                    for frame in self.resources.ship_large_for(kind)]
             for kind in SHIP_ORDER
         }
+        self.campaign_progress = getattr(app, "campaign_progress", None)
+        if self.campaign_progress is None:
+            self.campaign_progress = CampaignProgress.load()
+        self.campaign_focus = 0
+        self.campaign_rows = []
+        self.campaign_back_rect = pygame.Rect(0, 0, 0, 0)
+        self.campaign_mission_id = None
         self._build_screen(self.screen)
 
     # ------------------------------------------------------------ lifecycle
@@ -130,12 +142,13 @@ class Menu:
         self.mode_rects = []
         if name == "main":
             x = 100
-            y = 300
+            y = 286
             width = 342
-            height = 52
-            gap = 60
+            height = 48
+            gap = 55
             specs = [
                 (tr(self.language, "new_game"), "new_game"),
+                (tr(self.language, "campaign"), "campaign"),
                 (tr(self.language, "hangar"), "hangar"),
                 (tr(self.language, "leaderboard"), "leaderboard"),
                 (tr(self.language, "settings"), "settings"),
@@ -161,6 +174,10 @@ class Menu:
             self._build_single_back()
         elif name == "controls":
             self._build_single_back()
+        elif name == "campaign":
+            self._build_campaign()
+        elif name == "campaign_brief":
+            self._build_campaign_brief()
 
     def _build_single_back(self):
         self.widgets = WidgetGroup([
@@ -276,6 +293,88 @@ class Menu:
         current = getattr(self.settings, "difficulty", "normal")
         return DIFFICULTY_ORDER.index(current) if current in DIFFICULTY_ORDER else 1
 
+    # ------------------------------------------------------------ campaign
+    @staticmethod
+    def _campaign_panel():
+        return pygame.Rect(VW // 2 - 560, 86, 1120, 560)
+
+    @staticmethod
+    def _campaign_brief_panel():
+        return pygame.Rect(VW // 2 - 450, 66, 900, 600)
+
+    def _build_campaign(self):
+        self.widgets = None
+        self.campaign_rows = []
+        target = self.campaign_progress.next_open_mission()
+        self.campaign_focus = (MISSION_IDS.index(target)
+                               if target in MISSION_IDS else 0)
+
+    def _open_campaign_brief(self, mission_id):
+        if mission_id not in MISSION_IDS:
+            return
+        self.campaign_mission_id = mission_id
+        self._set_screen("campaign_brief")
+
+    def _build_campaign_brief(self):
+        mission = mission_by_id(self.campaign_mission_id)
+        if mission is None:
+            unlocked = [mid for mid in MISSION_IDS
+                        if self.campaign_progress.is_unlocked(mid)]
+            mission = mission_by_id(
+                unlocked[0] if unlocked
+                else first_mission_id(self.campaign_progress)
+            )
+        self.campaign_mission_id = mission["id"]
+        panel = self._campaign_brief_panel()
+        left = panel.x + 60
+        width = panel.width - 120
+        current = self.campaign_progress.difficulty
+        if current not in DIFFICULTY_ORDER:
+            current = "normal"
+        widgets = [
+            Choice((left, panel.y + 424, width, 40),
+                   lambda: tr(self.language, "campaign_difficulty_label"),
+                   [(key, tr(self.language, "difficulty_" + key))
+                    for key in DIFFICULTY_ORDER],
+                   lambda: DIFFICULTY_ORDER.index(
+                       self.campaign_progress.difficulty
+                       if self.campaign_progress.difficulty in DIFFICULTY_ORDER
+                       else "normal"),
+                   self._set_campaign_difficulty_index),
+            Button((left, panel.y + 478, 300, 48),
+                   lambda: tr(self.language,
+                              "campaign_replay"
+                              if self.campaign_progress.is_completed(mission["id"])
+                              else "campaign_start"),
+                   "campaign_start", size=19),
+            Button((left + width - 260, panel.y + 478, 260, 44),
+                   lambda: tr(self.language, "campaign_back"),
+                   "campaign_back", size=18),
+        ]
+        self.widgets = WidgetGroup(widgets, on_hover=self._hover_sound)
+
+    def _set_campaign_difficulty_index(self, index):
+        key = DIFFICULTY_ORDER[max(0, min(len(DIFFICULTY_ORDER) - 1,
+                                          int(index)))]
+        self.campaign_progress.difficulty = key
+        self.campaign_progress.save()
+        self.settings.difficulty = key
+        self.settings.save()
+        self.audio.play("ui_click", 0.4)
+
+    def _start_campaign(self):
+        mission = mission_by_id(self.campaign_mission_id)
+        if mission is None:
+            return
+        if not self.campaign_progress.is_unlocked(mission["id"]):
+            self.audio.play("low_health", 0.5)
+            return
+        self._click_sound()
+        difficulty = self.campaign_progress.difficulty
+        if difficulty not in DIFFICULTY_ORDER:
+            difficulty = getattr(self.settings, "difficulty", "normal")
+        self.app.start_campaign(mission["id"], self.settings.mode, difficulty)
+
     def _set_language_index(self, index):
         self.settings.language = "uk" if index == 0 else "en"
         self.language = self.settings.language
@@ -317,6 +416,13 @@ class Menu:
                 and self.screen != "hangar"):
             self._click_sound()
             self._set_screen("hangar")
+            return
+
+        if self.screen == "campaign":
+            self._handle_campaign_event(event, mouse)
+            return
+        if self.screen == "campaign_brief":
+            self._handle_campaign_brief_event(event, mouse)
             return
 
         if self.screen == "mode":
@@ -397,12 +503,57 @@ class Menu:
             elif self.hangar_back_rect.collidepoint(mouse):
                 self._set_screen("main")
 
+    def _handle_campaign_event(self, event, mouse):
+        if event.type == pygame.KEYDOWN:
+            if event.key == pygame.K_ESCAPE:
+                self._set_screen("main")
+            elif event.key in (pygame.K_UP, pygame.K_w):
+                self.campaign_focus = (self.campaign_focus - 1) % len(MISSION_IDS)
+                self._hover_sound()
+            elif event.key in (pygame.K_DOWN, pygame.K_s):
+                self.campaign_focus = (self.campaign_focus + 1) % len(MISSION_IDS)
+                self._hover_sound()
+            elif event.key in (pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_SPACE):
+                self._open_campaign_brief(MISSION_IDS[self.campaign_focus])
+            return
+        if event.type == pygame.MOUSEMOTION:
+            for index, rect in enumerate(self.campaign_rows):
+                if rect.collidepoint(mouse) and self.campaign_focus != index:
+                    self.campaign_focus = index
+                    self._hover_sound()
+        elif event.type == pygame.MOUSEBUTTONUP and event.button == 1:
+            for index, rect in enumerate(self.campaign_rows):
+                if rect.collidepoint(mouse):
+                    if index == self.campaign_focus:
+                        self._open_campaign_brief(MISSION_IDS[index])
+                    else:
+                        self.campaign_focus = index
+                        self._hover_sound()
+                    return
+            if self.campaign_back_rect.collidepoint(mouse):
+                self._set_screen("main")
+
+    def _handle_campaign_brief_event(self, event, mouse):
+        if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
+            self._set_screen("campaign")
+            return
+        if self.widgets is not None:
+            action = self.widgets.handle_event(event, mouse)
+            if action:
+                self._handle_action(action)
+
     def _handle_action(self, action):
         if action == "quit":
             self._click_sound()
             self.app.quit()
         elif action == "new_game":
             self._set_screen("mode")
+        elif action == "campaign":
+            self._set_screen("campaign")
+        elif action == "campaign_back":
+            self._set_screen("campaign")
+        elif action == "campaign_start":
+            self._start_campaign()
         elif action == "hangar":
             self._set_screen("hangar")
         elif action in ("leaderboard", "settings", "controls"):
@@ -476,6 +627,10 @@ class Menu:
             self._draw_leaderboard(canvas)
         elif self.screen == "controls":
             self._draw_controls(canvas)
+        elif self.screen == "campaign":
+            self._draw_campaign(canvas)
+        elif self.screen == "campaign_brief":
+            self._draw_campaign_brief(canvas)
 
         if self.screen_fade > 0:
             overlay = pygame.Surface((VW, VH), pygame.SRCALPHA)
@@ -798,6 +953,169 @@ class Menu:
                               11, palette["muted"], (rect.right - 30, row_y + 3),
                               anchor="topright")
         self.widgets.draw(canvas, self.resources, palette)
+
+    def _draw_campaign(self, canvas):
+        palette = self.palette
+        panel = self._campaign_panel()
+        draw_text(canvas, self.resources, tr(self.language, "campaign_title"), 38,
+                  palette["text"], (VW // 2, 36), anchor="center", shadow=(2, 5, 14))
+        draw_text(canvas, self.resources,
+                  tr(self.language, "campaign_progress",
+                     done=self.campaign_progress.completed_count(),
+                     total=self.campaign_progress.total_count()),
+                  14, palette["accent"], (VW // 2, 72), anchor="center")
+        draw_panel(canvas, panel, (*palette["panel"], 226), palette["border"], 16, 2)
+        draw_text(canvas, self.resources, tr(self.language, "campaign_hint"), 11,
+                  palette["muted"], (panel.centerx, panel.y + 16), anchor="center")
+
+        self.campaign_rows = []
+        row_x = panel.x + 20
+        row_w = panel.width - 40
+        start_y = panel.y + 40
+        for index, mission_id in enumerate(MISSION_IDS):
+            mission = mission_by_id(mission_id)
+            rect = pygame.Rect(row_x, start_y + index * 44, row_w, 40)
+            self.campaign_rows.append(rect)
+            focused = index == self.campaign_focus
+            completed = self.campaign_progress.is_completed(mission_id)
+            unlocked = self.campaign_progress.is_unlocked(mission_id)
+            if completed:
+                color = palette["success"]
+                status = tr(self.language, "campaign_completed")
+            elif unlocked:
+                color = palette["accent"]
+                status = tr(self.language, "campaign_available")
+            else:
+                color = palette["muted"]
+                status = tr(self.language, "campaign_locked")
+            fill = (24, 42, 70, 235) if focused else (14, 24, 44, 200)
+            if completed:
+                fill = (16, 44, 46, 220) if focused else (12, 32, 36, 190)
+            draw_panel(canvas, rect, fill,
+                       palette["accent"] if focused else palette["border"], 8,
+                       2 if focused else 1)
+            draw_text(canvas, self.resources, f"{index + 1:02d}", 12,
+                      palette["muted"], (rect.x + 14, rect.centery),
+                      anchor="midleft")
+            draw_text(canvas, self.resources, mission_name(self.language, mission),
+                      17, color if unlocked else palette["muted"],
+                      (rect.x + 52, rect.centery), anchor="midleft")
+            draw_text(canvas, self.resources,
+                      mission_zone_name(self.language, mission), 11,
+                      palette["muted"], (rect.x + 336, rect.centery),
+                      anchor="midleft")
+            draw_text(canvas, self.resources,
+                      mission_objective(self.language, mission), 11,
+                      palette["text"] if unlocked else palette["muted"],
+                      (rect.x + 520, rect.centery), anchor="midleft")
+            draw_text(canvas, self.resources, status, 11, color,
+                      (rect.right - 16, rect.centery), anchor="midright")
+
+        self.campaign_back_rect = pygame.Rect(panel.centerx - 130,
+                                              panel.bottom - 54, 260, 42)
+        hovered = self.campaign_back_rect.collidepoint(self.app.mouse)
+        draw_panel(canvas, self.campaign_back_rect,
+                   (18, 30, 58, 210) if not hovered else (30, 50, 80, 230),
+                   palette["accent"] if hovered else palette["border"], 10,
+                   2 if hovered else 1)
+        draw_text(canvas, self.resources, tr(self.language, "back"), 19,
+                  palette["accent"] if hovered else palette["text"],
+                  self.campaign_back_rect.center, anchor="center")
+        draw_text(canvas, self.resources, tr(self.language, "campaign_select_hint"),
+                  11, palette["muted"], (VW // 2, VH - 20), anchor="center")
+
+    def _draw_campaign_brief(self, canvas):
+        palette = self.palette
+        mission = mission_by_id(self.campaign_mission_id)
+        if mission is None:
+            return
+        mission_id = mission["id"]
+        completed = self.campaign_progress.is_completed(mission_id)
+        unlocked = self.campaign_progress.is_unlocked(mission_id)
+        panel = self._campaign_brief_panel()
+        draw_panel(canvas, panel, (*palette["panel"], 234),
+                   palette["accent"] if unlocked else palette["border"], 16, 2)
+        left = panel.x + 60
+        width = panel.width - 120
+
+        draw_text(canvas, self.resources, mission_name(self.language, mission), 30,
+                  palette["text"], (left, panel.y + 22), shadow=(2, 5, 14))
+        status = ("campaign_completed" if completed else
+                  ("campaign_available" if unlocked else "campaign_locked"))
+        status_color = (palette["success"] if completed else
+                        (palette["accent"] if unlocked else palette["muted"]))
+        draw_text(canvas, self.resources, tr(self.language, status), 12,
+                  status_color, (panel.right - 60, panel.y + 36), anchor="topright")
+
+        draw_text(canvas, self.resources,
+                  f"{tr(self.language, 'campaign_zone')}:  "
+                  f"{mission_zone_name(self.language, mission)}", 13,
+                  palette["muted"], (left, panel.y + 70))
+        draw_text(canvas, self.resources,
+                  f"{tr(self.language, 'campaign_objective')}:  "
+                  f"{mission_objective(self.language, mission)}", 13,
+                  palette["accent"], (left, panel.y + 92))
+        pygame.draw.line(canvas, palette["border"], (left, panel.y + 118),
+                         (panel.right - 60, panel.y + 118), 1)
+
+        brief_lines = self.resources.wrap_text(
+            tr(self.language, mission["brief_key"]), 15, width
+        )
+        for index, line in enumerate(brief_lines[:3]):
+            draw_text(canvas, self.resources, line, 15, palette["text"],
+                      (left, panel.y + 130 + index * 20), alpha=225)
+
+        draw_text(canvas, self.resources, tr(self.language, "campaign_story"), 11,
+                  palette["muted"], (left, panel.y + 194))
+        story_y = panel.y + 216
+        for line in mission["story"][:2]:
+            text = tr(self.language, line)
+            for wrapped in self.resources.wrap_text(text, 14, width)[:2]:
+                draw_text(canvas, self.resources, wrapped, 14, palette["text"],
+                          (left + 14, story_y), alpha=210)
+                story_y += 19
+
+        enemies = " · ".join(tr(self.language, "enemy_" + kind)
+                             for kind in mission["enemies"])
+        draw_text(canvas, self.resources,
+                  f"{tr(self.language, 'campaign_enemies')}:  {enemies}", 11,
+                  palette["muted"], (left, panel.y + 320))
+        if not unlocked:
+            draw_text(canvas, self.resources, tr(self.language, "campaign_unlock_hint"),
+                      13, palette["warning"], (left, panel.y + 342))
+            reward_text = None
+            reward_color = palette["muted"]
+        elif completed:
+            reward_text = tr(self.language, "campaign_reward_none")
+            reward_color = palette["muted"]
+        else:
+            reward_text = tr(self.language, "campaign_reward",
+                             salvage=int(mission["reward_salvage"]))
+            reward_color = palette["warning"]
+        if reward_text:
+            draw_text(canvas, self.resources, reward_text, 13, reward_color,
+                      (left, panel.y + 342))
+        best = self.campaign_progress.best_for(mission_id)
+        if best:
+            best_text = (f"{tr(self.language, 'campaign_best')}:  "
+                         f"{format_score(best['score'])}  ·  "
+                         f"{best['kills']} {tr(self.language, 'kills')}")
+        else:
+            best_text = (f"{tr(self.language, 'campaign_best')}:  "
+                         f"{tr(self.language, 'campaign_best_none')}")
+        draw_text(canvas, self.resources, best_text, 12, palette["muted"],
+                  (left, panel.y + 366))
+        ship_name = tr(self.language, SHIPS[self.settings.ship]["name"])
+        draw_text(canvas, self.resources,
+                  f"{tr(self.language, 'campaign_ship')}:  {ship_name}     "
+                  f"{tr(self.language, 'campaign_bonus')}:  "
+                  f"{self.campaign_progress.salvage_bonus}", 12,
+                  palette["muted"], (left, panel.y + 390))
+
+        self.widgets.draw(canvas, self.resources, palette)
+        draw_text(canvas, self.resources, tr(self.language, "campaign_brief_hint"),
+                  11, palette["muted"], (VW // 2, panel.bottom - 22),
+                  anchor="center")
 
     def _draw_controls(self, canvas):
         palette = self.palette

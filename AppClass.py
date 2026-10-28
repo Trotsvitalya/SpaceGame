@@ -5,6 +5,8 @@ from __future__ import annotations
 import pygame
 
 from AudioClass import AudioManager, MUSIC_END_EVENT
+from CampaignData import mission_by_id
+from CampaignProgress import CampaignProgress
 from GameProcessClass import GameProcess
 from MenuClass import Menu
 from ResourcesClass import Resources
@@ -59,6 +61,7 @@ class App:
         if force_windowed:
             self.settings.fullscreen = False
         self.leaderboard = Leaderboard.load()
+        self.campaign_progress = CampaignProgress.load()
         self._windowed_size = (VW, VH)
         self.window = None
         self.viewport = (0, 0, VW, VH)
@@ -160,7 +163,32 @@ class App:
         self.settings.save()
         self.transition_to(lambda: GameProcess(self, mode))
 
+    def start_campaign(self, mission_id, mode=None, difficulty=None):
+        """Launch one campaign mission, remembering the player's choices."""
+        mission = mission_by_id(mission_id)
+        if mission is None:
+            return None
+        if not self.campaign_progress.is_unlocked(mission_id):
+            return None
+        mode = mode or self.settings.mode
+        difficulty = (difficulty or self.campaign_progress.difficulty
+                      or getattr(self.settings, "difficulty", "normal"))
+        self.settings.mode = mode
+        self.settings.difficulty = difficulty
+        self.settings.save()
+        self.campaign_progress.begin_mission(
+            mission_id, ship=self.settings.ship, difficulty=difficulty
+        )
+        self.transition_to(lambda: GameProcess(
+            self, mode, difficulty=difficulty, mission=mission,
+            progress=self.campaign_progress,
+        ))
+        return mission
+
     def go_menu(self, screen="main"):
+        self.transition_to(lambda: Menu(self, initial_screen=screen))
+
+    def go_campaign(self, screen="campaign"):
         self.transition_to(lambda: Menu(self, initial_screen=screen))
 
     def quit(self):
