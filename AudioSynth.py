@@ -150,6 +150,8 @@ def make_sfx():
         "shot_burst": lambda: sequence([(880, 0.03), (1180, 0.05)], 0.24, "square"),
         "shot_lance": lambda: sweep(170, 980, 0.22, "saw", 0.3),
         "shot_spread": lambda: sequence([(360, 0.035), (300, 0.045)], 0.22, "triangle"),
+        "claw_slash": lambda: sweep(980, 120, 0.18, "saw", 0.34, wobble=0.12),
+        "chainsaw": lambda: sweep(75, 245, 0.42, "saw", 0.38, wobble=0.22),
         "upgrade_open": lambda: sequence([(392, 0.07), (523, 0.07), (659, 0.12)], 0.32,
                                          "triangle"),
         "upgrade_apply": lambda: sequence([(523, 0.05), (659, 0.05), (784, 0.05),

@@ -507,10 +507,10 @@ class GameFlowTests(GameTestCase):
         self.assertEqual(game.state, "playing")
         self.assertGreater(game.player.invulnerable_timer, 0)
 
-    def test_tiger_pickup_freezes_world_and_strike_clears_hostiles(self):
+    def test_tiger_pickup_freezes_world_and_cuts_enemies_progressively(self):
         game = self.make_game("meme")
         enemy = EnemyShip("scout", "meme", self.app.resources,
-                          x=VW * .5, y=180)
+                          x=VW * .5, y=VH * .49)
         game.enemies.append(enemy)
         game.spawn_enemy_bullet(VW * .5, 220, math.pi / 2, 0)
         self.assertTrue(game._spawn_tiger_powerup())
@@ -518,22 +518,27 @@ class GameFlowTests(GameTestCase):
         pickup = game.powerups[-1]
         game._collect_powerup(pickup, game.player)
         game.tiger_ultimate.loader_thread.join(timeout=10)
-        self.assertEqual(len(game.tiger_ultimate.frames), 90)
+        self.assertEqual(len(game.tiger_ultimate.frames), 75)
         game.tiger_ultimate.phase = "reveal"
         game.tiger_ultimate.elapsed = .5
         game.draw(pygame.Surface((VW, VH), pygame.SRCALPHA))
-        self.assertTrue(game.tiger_ultimate.video_has_title)
         x_before = enemy.posX
         bullet_before = game.enemy_bullets[0].posY
         game.update(.05)
         self.assertEqual(enemy.posX, x_before)
         self.assertEqual(game.enemy_bullets[0].posY, bullet_before)
         game._tiger_strike()
-        self.assertEqual(game.enemies, [])
+        self.assertTrue(enemy.alive)
         self.assertEqual(game.enemy_bullets, [])
+        game._tiger_cut("claw", 0)
+        self.assertFalse(enemy.alive)
+        self.assertEqual(len(game.enemies), 1)
+        game._tiger_finish_strike()
+        self.assertEqual(game.enemies, [])
         self.assertEqual(game._player_hit(game.player), "none")
 
     def test_tiger_bonus_is_meme_only_and_state_machine_finishes(self):
+        self.assertEqual(TigerUltimate.DROP_CHANCE, .20)
         normal = self.make_game("normal")
         self.assertFalse(normal._spawn_tiger_powerup())
         game = self.make_game("meme")

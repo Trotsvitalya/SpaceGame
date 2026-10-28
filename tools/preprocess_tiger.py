@@ -38,7 +38,7 @@ def key_frame(frame_bgr, hue_center=60, hue_tolerance=24,
 
 def extract(source, output, hue_center=60, hue_tolerance=24,
             saturation_floor=35, softness=22, spill=0.38,
-            max_width=640, contains_title=False):
+            max_width=640, contains_title=False, last_clean_frame=None):
     capture = cv2.VideoCapture(source)
     if not capture.isOpened():
         raise RuntimeError(f"Could not decode video: {source}")
@@ -60,6 +60,8 @@ def extract(source, output, hue_center=60, hue_tolerance=24,
                 source_index += 1
                 continue
             source_index += 1
+            if last_clean_frame is not None and count > last_clean_frame:
+                break
             keyed = key_frame(frame, hue_center, hue_tolerance,
                               saturation_floor, softness, spill)
             if keyed.shape[1] > max_width:
@@ -94,7 +96,8 @@ def extract(source, output, hue_center=60, hue_tolerance=24,
                    "frame_width": min(width, max_width),
                    "frame_height": round(height * min(width, max_width) / width),
                    "frames": count, "duration": count / output_fps,
-                   "contains_title": bool(contains_title),
+                   "contains_title": bool(contains_title and last_clean_frame is None),
+                   "source_contains_title": bool(contains_title),
                    "frame_boxes": frame_boxes}, f, indent=2)
     return count
 
@@ -111,10 +114,13 @@ def main():
     parser.add_argument("--max-width", type=int, default=640)
     parser.add_argument("--contains-title", action="store_true",
                         help="The supplied video already contains 虎虎生威")
+    parser.add_argument("--last-clean-frame", type=int, default=None,
+                        help="Last extracted frame before an embedded title appears")
     args = parser.parse_args()
     count = extract(args.source, args.output, args.hue, args.tolerance,
                     args.saturation, args.softness, args.spill,
-                    args.max_width, args.contains_title)
+                    args.max_width, args.contains_title,
+                    args.last_clean_frame)
     print(f"Wrote {count} transparent PNG frames to {args.output}")
 
 

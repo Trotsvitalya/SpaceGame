@@ -235,6 +235,12 @@ class CoopClientScene:
             except (TypeError, ValueError):
                 self.tiger_ultimate.elapsed = self.tiger_ultimate.phase_time = 0.0
             self.tiger_ultimate.struck = bool(tiger.get("struck", False))
+            previous_cut_event = self.tiger_ultimate.remote_cut_event
+            self.tiger_ultimate.sync_remote_cut_events()
+            for _when, kind, _index in TigerUltimate.CUT_EVENTS[
+                    previous_cut_event:self.tiger_ultimate.remote_cut_event]:
+                self.audio.play("chainsaw" if kind == "chainsaw" else "claw_slash",
+                                0.8, throttle_ms=80)
             paused = self.state == "paused"
             if paused != self._tiger_paused:
                 (self.audio.pause_tiger_ultimate() if paused else

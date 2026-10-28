@@ -46,7 +46,7 @@ class PowerUp:
             "weapon": "W",
             "rapid": "R",
             "points": "*",
-            "tiger": "虎",
+            "tiger": "T",
         }[self.kind]
 
     @classmethod

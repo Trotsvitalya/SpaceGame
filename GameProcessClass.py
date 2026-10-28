@@ -633,6 +633,10 @@ class GameProcess:
                 dt, audio_busy=self.audio.tiger_ultimate_busy())
             if event == "strike":
                 self._tiger_strike()
+            elif isinstance(event, tuple):
+                self._tiger_cut(*event)
+            elif event == "clear":
+                self._tiger_finish_strike()
             elif event == "done":
                 self.audio.resume_music()
             return
@@ -875,18 +879,37 @@ class GameProcess:
         return True
 
     def _tiger_strike(self):
-        for enemy in self.enemies:
-            enemy.alive = False
-        self.enemies.clear()
+        # The cinematic keeps combat paused, but attacks resolve progressively
+        # as each visible claw or saw crosses the arena.
         self.enemy_bullets.clear()
         self.player_bullets.clear()
         self.pending_asteroids.clear()
         self.danger_zones.clear()
         self.beams.clear()
         self._hazard_hits.clear()
-        self.effects.clear()
+
+    def _tiger_cut(self, kind, index):
+        segment = TigerUltimate.cut_segment(kind, index)
+        hit = []
+        for enemy in self.enemies:
+            if (enemy.alive and segment_circle_hit(
+                    *segment, enemy.posX, enemy.posY,
+                    enemy.hit_radius + (16 if kind == "chainsaw" else 12))):
+                hit.append(enemy)
+        for enemy in hit:
+            self._kill_enemy(enemy, award=True, drop=False)
+        self.audio.play("chainsaw" if kind == "chainsaw" else "claw_slash",
+                        0.8, throttle_ms=80)
+
+    def _tiger_finish_strike(self):
+        # A final burst catches enemies between lanes and ends the attack.
+        for enemy in tuple(self.enemies):
+            self._kill_enemy(enemy, award=True, drop=False)
+        self.enemies = [enemy for enemy in self.enemies if enemy.alive]
+        self.pending_asteroids.clear()
+        self.enemy_bullets.clear()
+        self.player_bullets.clear()
         if self.boss is not None:
-            # The attack damages only bosses whose current phase is not mission-scripted.
             scripted = bool(self.campaign and self.campaign_mission.get("boss"))
             if not scripted:
                 self._defeat_boss()
@@ -1307,8 +1330,6 @@ class GameProcess:
         player = player or self.player
         if powerup.kind == "tiger":
             powerup.alive = False
-            self.effects.text(tr(self.language, "tiger_ultimate_pickup"),
-                              VW * .5, VH * .37, (255, 206, 86), 30, 1.6)
             self.tiger_ultimate.start()
             self.audio.pause_music()
             self.audio.play_tiger_ultimate()
