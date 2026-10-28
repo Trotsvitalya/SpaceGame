@@ -1,0 +1,4 @@
+# pygame-ce is a drop-in replacement for pygame and imports as `pygame`.
+# On Python versions that have official pygame wheels you may use
+# `pygame>=2.5` instead, but only one of the two packages at a time.
+pygame-ce>=2.5.8
