@@ -20,6 +20,7 @@ class MemeEventSystem:
         "red_envelopes": 6.0,
         "coffin_dance": 5.8,
     }
+    BOAT_MAX_ARROWS = 100
 
     def __init__(self):
         self.kind = None
@@ -158,7 +159,7 @@ class MemeEventSystem:
         cx, cy, _progress = self._boat_position()
         if abs(bullet.posX - cx) > 248 or abs(bullet.posY - cy) > 92:
             return False
-        self.arrow_count = min(38, self.arrow_count + 1)
+        self.arrow_count = min(self.BOAT_MAX_ARROWS, self.arrow_count + 1)
         return True
 
     def draw_arrow(self, surface, bullet):

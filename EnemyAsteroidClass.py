@@ -262,9 +262,11 @@ class EnemyShip:
         event = getattr(game, "meme_event", None)
         if event is not None and event.kind == "straw_boat":
             tx, ty, _progress = event._boat_position()
+            boat_is_target = True
         else:
             tx = player.centerx if player.alive else VW * 0.5
             ty = player.centery if player.alive else VH
+            boat_is_target = False
         base_angle = math.atan2(ty - self.posY, tx - self.posX)
         nose_y = self.posY + self.radius * 0.7
         speed = self.balance.bullet_speed(self.wave) * (
@@ -282,7 +284,9 @@ class EnemyShip:
         elif self.kind == "bomber":
             for offset in (-0.5, -0.25, 0.0, 0.25, 0.5):
                 game.spawn_enemy_bullet(
-                    self.posX, nose_y, math.pi / 2 + offset, speed * 0.78,
+                    self.posX, nose_y,
+                    (base_angle if boat_is_target else math.pi / 2) + offset,
+                    speed * 0.78,
                     radius=7.0,
                 )
             game.effects.hit_sparks(self.posX, nose_y, game.enemy_bullet_color, count=6)
@@ -311,7 +315,8 @@ class EnemyShip:
             else:
                 total = 10
                 for index in range(total):
-                    angle = index / total * math.tau + self.time * 0.4
+                    angle = (base_angle if boat_is_target else self.time * 0.4)
+                    angle += index / total * math.tau
                     game.spawn_enemy_bullet(
                         self.posX, self.posY, angle, speed * 0.7,
                         radius=6.0, kind="enemy_plasma",
@@ -426,6 +431,16 @@ class BossEnemy:
     def phase_key(self):
         return f"boss_phase_{self.phase}"
 
+    def _aim_angle(self, game):
+        event = getattr(game, "meme_event", None)
+        if event is not None and event.kind == "straw_boat":
+            target_x, target_y, _progress = event._boat_position()
+        else:
+            player = game.target_player(self.posX, self.posY)
+            target_x = player.centerx if player.alive else VW * 0.5
+            target_y = player.centery if player.alive else VH
+        return math.atan2(target_y - self.posY, target_x - self.posX)
+
     def _animate(self, dt):
         if len(self.frames) <= 1:
             return
@@ -512,8 +527,7 @@ class BossEnemy:
         )
 
     def _attack_fan(self, game, events):
-        player = game.target_player(self.posX, self.posY)
-        base = math.atan2(player.centery - self.posY, player.centerx - self.posX)
+        base = self._aim_angle(game)
         speed = self._bullet_speed()
         for offset in (-0.5, -0.25, 0.0, 0.25, 0.5):
             game.spawn_enemy_bullet(self.posX, self.posY + 76, base + offset, speed,
@@ -525,10 +539,12 @@ class BossEnemy:
 
     def _attack_aimed(self, game, events):
         player = game.target_player(self.posX, self.posY)
-        if not player.alive:
+        event = getattr(game, "meme_event", None)
+        boat_is_target = event is not None and event.kind == "straw_boat"
+        if not player.alive and not boat_is_target:
             self._attack_fan(game, events)
             return
-        base = math.atan2(player.centery - self.posY, player.centerx - self.posX)
+        base = self._aim_angle(game)
         for offset in (-0.08, 0.0, 0.08):
             game.spawn_enemy_bullet(self.posX, self.posY + 70, base + offset,
                                     self._bullet_speed() * 1.2, radius=6.0,
@@ -537,8 +553,12 @@ class BossEnemy:
     def _attack_ring(self, game, events):
         total = 16 if self.phase < 3 else 22
         speed = self._bullet_speed() * 0.72
+        event = getattr(game, "meme_event", None)
+        base_angle = (self._aim_angle(game)
+                      if event is not None and event.kind == "straw_boat"
+                      else self.time * 0.45)
         for index in range(total):
-            angle = index / total * math.tau + self.time * 0.45
+            angle = base_angle + index / total * math.tau
             game.spawn_enemy_bullet(self.posX, self.posY, angle, speed,
                                     radius=7.0, kind="enemy_plasma")
         game.effects.ring(self.posX, self.posY, game.enemy_bullet_color, 140, 0.55, 3)
@@ -547,8 +567,12 @@ class BossEnemy:
     def _attack_spiral(self, game, events):
         arms = 3 if self.phase < 3 else 4
         speed = self._bullet_speed() * 0.66
+        event = getattr(game, "meme_event", None)
+        base_angle = (self._aim_angle(game)
+                      if event is not None and event.kind == "straw_boat"
+                      else self.time * 1.9)
         for index in range(arms):
-            angle = self.time * 1.9 + index * math.tau / arms
+            angle = base_angle + index * math.tau / arms
             game.spawn_enemy_bullet(self.posX, self.posY, angle, speed,
                                     radius=6.5, kind="enemy_orb")
             game.spawn_enemy_bullet(self.posX, self.posY, angle + math.pi, speed,
@@ -584,11 +608,16 @@ class BossEnemy:
 
     def _attack_zones(self, game, events):
         self.charge = 1.1
-        player = game.target_player(self.posX, self.posY)
+        event = getattr(game, "meme_event", None)
+        if event is not None and event.kind == "straw_boat":
+            target_x, target_y, _progress = event._boat_position()
+        else:
+            player = game.target_player(self.posX, self.posY)
+            target_x, target_y = player.centerx, player.centery
         targets = [
-            (player.centerx, player.centery),
-            (player.centerx + 220, player.centery - 110),
-            (player.centerx - 220, player.centery - 110),
+            (target_x, target_y),
+            (target_x + 220, target_y - 110),
+            (target_x - 220, target_y - 110),
         ]
         for x, y in targets:
             game.spawn_danger_zone(

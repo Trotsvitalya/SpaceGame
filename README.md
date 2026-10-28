@@ -12,8 +12,8 @@
 - **Meme superpowers:** buy Tiger and Chainsaw charges with Meme Points. Press `1` for Tiger and `2` for Chainsaw; the first press buys a charge when you have enough points, and the next activates it.
 - **Tiger Ultimate:** the full video plays and disappears before the claw strikes begin. Lighting returns to normal as gameplay resumes.
 - **Chainsaw Ultimate:** pauses for a screen-split effect, then sends chainsaws after enemies. Enemies flee and ignore the player while it is active.
-- **Meme events:** a sailing straw boat collects arrows with drum, water, and Mandarin battle-call cues; a vacuum hurricane pulls nearby entities and sounds its own air-raid siren; a golden dragon attacks enemies; red envelopes can be collected; and Coffin Dance plays its synthesized dance loop. Coffin Dance is intentionally rare: it can appear every 36th kill or every third boss in Meme Mode.
-- **Sharp display scaling:** the game renders to a fixed 1280×720 canvas and scales it to the selected display size without filtering. Fullscreen and windowed sizes can be selected in Settings.
+- **Meme events:** enemies and bosses aim at the sailing straw boat; absorbed shots add arrows to its deck (up to 100). The boat has drum, water, and Mandarin battle-call cues; a vacuum hurricane pulls nearby entities and sounds its own air-raid siren; a golden dragon attacks enemies; red envelopes can be collected; and Coffin Dance plays its synthesized dance loop. Coffin Dance is intentionally rare: it can appear every 36th kill or every third boss in Meme Mode.
+- **Display scaling:** the game renders to a fixed 1280×720 canvas. Integer scale factors keep pixel edges crisp; fractional sizes such as 1920×1080 use filtered scaling to avoid unevenly stretched glyphs. Fullscreen and windowed sizes can be selected in Settings.
 - **Accessibility and persistence:** configurable sound, graphics quality, reduced flashes, screen shake, focus pause, and language. Settings, records, and campaign progress are saved locally.
 
 ## Requirements

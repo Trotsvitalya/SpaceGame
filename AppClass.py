@@ -300,8 +300,14 @@ class App:
         if view_w == VW and view_h == VH:
             window.blit(self.canvas, (offset_x, offset_y))
         else:
-            # Nearest-neighbor scaling keeps text, sprites and fullscreen video
-            # edges sharp at fractional desktop scale factors as well.
-            scaled = pygame.transform.scale(self.canvas, (view_w, view_h))
+            scale = min(view_w / VW, view_h / VH)
+            if scale >= 1.0 and abs(scale - round(scale)) < 1e-6:
+                # Integer scaling preserves crisp pixel edges exactly.
+                scaled = pygame.transform.scale(self.canvas, (view_w, view_h))
+            else:
+                # Fractional nearest-neighbor scaling gives glyphs uneven
+                # widths/heights (notably 1280→1920); filtered resampling keeps
+                # typography and circles proportional at those sizes.
+                scaled = pygame.transform.smoothscale(self.canvas, (view_w, view_h))
             window.blit(scaled, (offset_x, offset_y))
         pygame.display.flip()
