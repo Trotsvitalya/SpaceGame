@@ -104,6 +104,10 @@ class GameProcess:
         self.beams = []
         self.boss = None
         self.boss_drop_flags = {}
+        self.players = [self.player]
+        self.extra_players = []
+        self.coop = False
+        self._hazard_hits = {}
 
         self.score = 0.0
         self.display_score = 0.0
@@ -305,81 +309,109 @@ class GameProcess:
         firing = bool(keys[pygame.K_SPACE])
         return move_x, move_y, firing
 
+    def _input_for(self, ship):
+        if ship is self.player:
+            return self._read_input()
+        return (0.0, 0.0, False)
+
     def _update_player(self, dt):
-        move_x, move_y, firing = self._read_input()
-        events = self.player.update(dt, move_x, move_y)
+        for ship in self.players:
+            if ship.alive:
+                self._update_ship(ship, dt)
+        self._check_run_end()
+
+    def _update_ship(self, ship, dt):
+        move_x, move_y, firing = self._input_for(ship)
+        events = ship.update(dt, move_x, move_y)
         for event_name in events:
             if event_name == "weapon_expired":
                 self.effects.text(
                     tr(self.language, "weapon_expired"),
-                    self.player.centerx, self.player.posY - 18,
+                    ship.centerx, ship.posY - 18,
                     self.palette["warning"], 15, 1.4,
                 )
             elif event_name == "shield_expired":
                 self.effects.text(
                     tr(self.language, "shield_expired"),
-                    self.player.centerx, self.player.posY - 18,
+                    ship.centerx, ship.posY - 18,
                     self.palette["muted"], 15, 1.3,
                 )
             elif event_name == "rapid_expired":
                 self.effects.text(
                     tr(self.language, "rapid_expired"),
-                    self.player.centerx, self.player.posY - 18,
+                    ship.centerx, ship.posY - 18,
                     self.palette["muted"], 15, 1.3,
                 )
             elif event_name == "respawned":
-                self.effects.ring(self.player.centerx, self.player.centery,
+                self.effects.ring(ship.centerx, ship.centery,
                                   self.palette["accent"], 72, 0.7, 3)
-                self.effects.pickup(self.player.centerx, self.player.centery,
+                self.effects.pickup(ship.centerx, ship.centery,
                                     self.palette["accent"])
                 self.audio.play("shield", 0.6)
 
-        if firing and self.player.alive:
-            self._try_fire()
+        if firing and ship.alive:
+            self._try_fire(ship)
 
-        if self.player.alive:
-            self.engine_accum += dt
+        if ship.alive:
+            ship.engine_accum = getattr(ship, "engine_accum", 0.0) + dt
             flame = self.palette["accent"] if self.mode == "normal" else self.palette["accent2"]
-            while self.engine_accum >= 0.024:
-                self.engine_accum -= 0.024
+            while ship.engine_accum >= 0.024:
+                ship.engine_accum -= 0.024
                 self.effects.engine(
-                    self.player.centerx + random.uniform(-5, 5),
-                    self.player.posY + self.player.height - 6,
-                    flame, 0.85 + max(0.0, -self.player.vy) / 500.0,
+                    ship.centerx + random.uniform(-5, 5),
+                    ship.posY + ship.height - 6,
+                    flame, 0.85 + max(0.0, -ship.vy) / 500.0,
                 )
-            if self.player.shield_timer > 0 and random.random() < 0.16:
+            if ship.shield_timer > 0 and random.random() < 0.16:
                 angle = random.uniform(0, math.tau)
                 self.effects.trail(
-                    self.player.centerx + math.cos(angle) * 44,
-                    self.player.centery + math.sin(angle) * 44,
+                    ship.centerx + math.cos(angle) * 44,
+                    ship.centery + math.sin(angle) * 44,
                     self.palette["accent"],
                 )
         else:
-            self.engine_accum = 0.0
+            ship.engine_accum = 0.0
 
-        # Safety net: a dead player with zero lives must always end the run.
-        if not self.player.alive and self.player.life <= 0 and self.state == "playing":
+    def _check_run_end(self):
+        if self.state != "playing":
+            return
+        if not self.coop:
+            if not self.player.alive and self.player.life <= 0:
+                self.state = "dying"
+                self.death_timer = 1.8
+            return
+        # Co-op only ends when neither pilot can come back: both are downed
+        # (zero lives) or already waiting for the run-end transition.  A ship
+        # that still has lives and is merely respawning must not end the run.
+        exhausted = []
+        for ship in self.players:
+            downed = bool(getattr(ship, "downed", False))
+            exhausted.append((not ship.alive and ship.life <= 0) or downed)
+        if all(exhausted):
             self.state = "dying"
             self.death_timer = 1.8
 
-    def _try_fire(self):
-        shots = self.player.fire_volley()
+    def _try_fire(self, ship=None):
+        ship = ship or self.player
+        shots = ship.fire_volley()
         if not shots:
             return
-        weapon = WEAPONS.get(self.player.weapon_class, WEAPONS["pulse"])
+        weapon = WEAPONS.get(ship.weapon_class, WEAPONS["pulse"])
         color = weapon["color"] if self.mode == "normal" else self.palette["bullet"]
-        sprite = self.resources.bullet_sprite("player_" + self.player.weapon_class,
+        sprite = self.resources.bullet_sprite("player_" + ship.weapon_class,
                                               self.mode)
         for shot in shots:
             if len(self.player_bullets) >= self.MAX_PLAYER_BULLETS:
                 self.player_bullets.pop(0)
-            self.player_bullets.append(Bullet(
+            bullet = Bullet(
                 shot.x, shot.y, sprite=sprite, vx=shot.vx, vy=shot.vy,
                 radius=shot.radius, damage=shot.damage, color=color,
                 kind=shot.kind, pierce=shot.pierce, splash=shot.splash,
-            ))
+            )
+            bullet.owner = ship
+            self.player_bullets.append(bullet)
         self.effects.muzzle(
-            self.player.centerx, self.player.posY + 2, color,
+            ship.centerx, ship.posY + 2, color,
             angle=-math.pi / 2, intensity=0.7,
         )
         self.audio.play(weapon.get("sound", "shot"), 0.38, throttle_ms=45)
@@ -436,11 +468,28 @@ class GameProcess:
             beam.update(dt)
         self.danger_zones = [zone for zone in self.danger_zones if zone.alive]
         self.beams = [beam for beam in self.beams if beam.alive]
+        live_ids = {id(zone) for zone in self.danger_zones}
+        live_ids.update(id(beam) for beam in self.beams)
+        if len(self._hazard_hits) > len(live_ids):
+            self._hazard_hits = {key: value for key, value in self._hazard_hits.items()
+                                 if key in live_ids}
         self.metrics.note_hazards(len(self.danger_zones), len(self.beams))
+
+    def target_player(self, x, y):
+        return self.nearest_player(x, y)
+
+    def nearest_player(self, x, y, alive_only=True):
+        candidates = [ship for ship in self.players
+                      if ship.alive or not alive_only]
+        if not candidates:
+            return self.player
+        return min(candidates, key=lambda ship: math.hypot(
+            ship.centerx - x, ship.centery - y))
 
     def _update_powerups(self, dt):
         for powerup in self.powerups:
-            powerup.update(dt, self.player)
+            target = self.nearest_player(powerup.posX, powerup.posY)
+            powerup.update(dt, target)
         self.powerups = [powerup for powerup in self.powerups if powerup.alive]
 
     def _update_combo(self, dt):
@@ -857,69 +906,76 @@ class GameProcess:
                             self.palette["warning"], 16, 1.3,
                         )
 
-        # Enemy bullets vs player.
-        if self.player.alive:
+        # Enemy bullets, hazards, contact damage and pickups for every ship.
+        for player in self.players:
+            if not player.alive:
+                continue
             for bullet in self.enemy_bullets:
                 if not bullet.alive:
                     continue
                 if segment_circle_hit(
                     bullet.prev_x, bullet.prev_y, bullet.posX, bullet.posY,
-                    self.player.centerx, self.player.centery,
-                    self.player.hit_radius + bullet.radius,
+                    player.centerx, player.centery,
+                    player.hit_radius + bullet.radius,
                 ):
                     bullet.alive = False
-                    result = self._player_hit()
+                    result = self._player_hit(player)
                     if result != "none":
                         break
 
-        # Telegraphed hazards.
-        if self.player.alive:
+        for player in self.players:
+            if not player.alive:
+                continue
             for zone in self.danger_zones:
-                if zone.active and not zone.hit_player and zone.contains(
-                    self.player.centerx, self.player.centery,
-                    self.player.hit_radius * 0.45,
-                ):
-                    zone.hit_player = True
-                    if self._player_hit() != "none":
+                hits = self._hazard_hits.setdefault(id(zone), set())
+                if (zone.active and id(player) not in hits
+                        and zone.contains(player.centerx, player.centery,
+                                          player.hit_radius * 0.45)):
+                    hits.add(id(player))
+                    if self._player_hit(player) != "none":
                         break
-            if self.player.alive:
-                for beam in self.beams:
-                    if not beam.hit_player and beam.hits(
-                        self.player.centerx, self.player.centery,
-                        self.player.hit_radius * 0.7,
-                    ):
-                        beam.hit_player = True
-                        if self._player_hit() != "none":
-                            break
+            if not player.alive:
+                continue
+            for beam in self.beams:
+                hits = self._hazard_hits.setdefault(id(beam), set())
+                if (id(player) not in hits and beam.hits(
+                    player.centerx, player.centery,
+                    player.hit_radius * 0.7,
+                )):
+                    hits.add(id(player))
+                    if self._player_hit(player) != "none":
+                        break
 
-        # Contact damage.
-        if self.player.alive:
+        for player in self.players:
+            if not player.alive:
+                continue
             for enemy in self.enemies:
                 if not enemy.alive:
                     continue
-                if circle_hit(self.player.centerx, self.player.centery,
-                              self.player.hit_radius, enemy.posX, enemy.posY,
+                if circle_hit(player.centerx, player.centery,
+                              player.hit_radius, enemy.posX, enemy.posY,
                               enemy.hit_radius):
-                    result = self._player_hit()
+                    result = self._player_hit(player)
                     if result in ("shield", "dead"):
                         self._kill_enemy(enemy, award=(result == "shield"))
                         if self.state != "playing":
                             break
-            if self.boss is not None and self.player.alive:
-                if circle_hit(self.player.centerx, self.player.centery,
-                              self.player.hit_radius, self.boss.posX, self.boss.posY,
+            if self.boss is not None and player.alive:
+                if circle_hit(player.centerx, player.centery,
+                              player.hit_radius, self.boss.posX, self.boss.posY,
                               self.boss.hit_radius):
-                    self._player_hit()
+                    self._player_hit(player)
 
-        # Power-ups.
-        if self.player.alive:
+        for player in self.players:
+            if not player.alive:
+                continue
             for powerup in self.powerups:
                 if powerup.alive and circle_hit(
-                    self.player.centerx, self.player.centery,
-                    self.player.hit_radius + 4, powerup.posX, powerup.posY,
+                    player.centerx, player.centery,
+                    player.hit_radius + 4, powerup.posX, powerup.posY,
                     powerup.radius + 7,
                 ):
-                    self._collect_powerup(powerup)
+                    self._collect_powerup(powerup, player)
 
         self.player_bullets = [bullet for bullet in self.player_bullets if bullet.alive]
         self.enemy_bullets = [bullet for bullet in self.enemy_bullets if bullet.alive]
@@ -930,20 +986,21 @@ class GameProcess:
             self.pending_asteroids.clear()
 
     # --------------------------------------------------------------- damage
-    def _player_hit(self):
-        result = self.player.take_hit()
+    def _player_hit(self, player=None):
+        player = player or self.player
+        result = player.take_hit()
         if result == "none":
             return result
         if result == "shield":
             self.effects.shield_hit(
-                self.player.centerx, self.player.centery, self.palette["accent"]
+                player.centerx, player.centery, self.palette["accent"]
             )
             self.audio.play("shield", 0.85)
             self.shake.add(0.3)
-            self._clear_enemy_bullets_near(self.player.centerx, self.player.centery, 210)
+            self._clear_enemy_bullets_near(player.centerx, player.centery, 210)
             self.effects.text(
-                tr(self.language, "shield"), self.player.centerx,
-                self.player.posY - 24, self.palette["accent"], 20, 1.2,
+                tr(self.language, "shield"), player.centerx,
+                player.posY - 24, self.palette["accent"], 20, 1.2,
             )
             return result
 
@@ -953,23 +1010,32 @@ class GameProcess:
         self.combo_timer = 0.0
         self.multiplier = 1
         self.effects.explosion(
-            self.player.centerx, self.player.centery,
+            player.centerx, player.centery,
             (255, 180, 90) if self.mode == "normal" else (255, 120, 220),
             count=52, speed=330, size=4.8, life=1.05,
         )
-        self.effects.boom(self.player.centerx, self.player.centery, 62)
+        self.effects.boom(player.centerx, player.centery, 62)
         self.effects.flash((255, 210, 170), 95)
         self.shake.add(0.8)
         self.audio.play("crash", 0.95)
         if self.mode == "meme":
             self.audio.play("meme_explode", 0.7)
-        self._clear_enemy_bullets_near(self.player.centerx, self.player.centery, 240)
-        if self.player.life <= 0:
-            self.state = "dying"
-            self.death_timer = 1.8
+        self._clear_enemy_bullets_near(player.centerx, player.centery, 240)
+        if player.life <= 0:
+            if self.coop:
+                player.downed = True
+                player.revive_progress = 0.0
+                self._on_player_downed(player)
+                self._check_run_end()
+            else:
+                self.state = "dying"
+                self.death_timer = 1.8
         else:
             self.audio.play("low_health", 0.7)
         return result
+
+    def _on_player_downed(self, player):
+        """Hook for co-op scenes; single-player ends the run instead."""
 
     def _kill_enemy(self, enemy, award=True, drop=True):
         if getattr(enemy, "_handled", False):
@@ -1062,6 +1128,12 @@ class GameProcess:
         if self.player.alive:
             for _ in range(self.balance.post_boss_heal):
                 self.player.heal()
+        for player in self.players:
+            if player is self.player:
+                continue
+            if player.alive:
+                for _ in range(self.balance.post_boss_heal):
+                    player.heal()
         self.spawn_grace = self.balance.post_boss_grace
         self.spawn_timer = self.spawn_grace
         if self.campaign:
@@ -1166,20 +1238,21 @@ class GameProcess:
         self.score += gained
         return gained
 
-    def _collect_powerup(self, powerup):
+    def _collect_powerup(self, powerup, player=None):
         if not powerup.alive:
             return
+        player = player or self.player
         powerup.alive = False
         kind = powerup.kind
         color = powerup.color
         message = ""
         self.effects.pickup(powerup.posX, powerup.posY, color)
         if kind == "shield":
-            self.player.add_shield(12.0)
+            player.add_shield(12.0)
             message = tr(self.language, "meme_pickup_shield" if self.mode == "meme"
                          else "pickup_shield", seconds=12)
         elif kind == "life":
-            if self.player.heal():
+            if player.heal():
                 message = tr(self.language, "meme_pickup_life" if self.mode == "meme"
                              else "pickup_life")
             else:
@@ -1187,16 +1260,16 @@ class GameProcess:
                 self.score += bonus
                 message = tr(self.language, "pickup_life_full", points=bonus)
         elif kind == "weapon":
-            improved = self.player.add_weapon()
+            improved = player.add_weapon()
             if improved:
                 message = tr(self.language, "meme_pickup_weapon" if self.mode == "meme"
-                             else "pickup_weapon", level=self.player.weapon_level)
+                             else "pickup_weapon", level=player.weapon_level)
             else:
                 bonus = 1000 * self.multiplier
                 self.score += bonus
                 message = tr(self.language, "pickup_weapon_max", points=bonus)
         elif kind == "rapid":
-            self.player.add_rapid(11.0)
+            player.add_rapid(11.0)
             message = tr(self.language, "meme_pickup_rapid" if self.mode == "meme"
                          else "pickup_rapid", seconds=11)
         else:  # points
@@ -1495,7 +1568,8 @@ class GameProcess:
         for bullet in self.enemy_bullets:
             bullet.draw(world)
 
-        self.player.draw(world, self.resources, self.time, self.mode)
+        for player in self.players:
+            player.draw(world, self.resources, self.time, self.mode)
         self.effects.draw(world)
 
     def _draw_hud(self, canvas):

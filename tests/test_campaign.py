@@ -399,8 +399,9 @@ class CampaignMenuTests(unittest.TestCase):
         menu = self.make_menu()
         actions = [button.action for button in menu.widgets.widgets]
         self.assertIn("campaign", actions)
+        self.assertIn("multiplayer", actions)
         self.assertIn("new_game", actions)
-        self.assertEqual(len(actions), 7)
+        self.assertEqual(len(actions), 8)
 
     def test_campaign_list_navigation_and_draw(self):
         menu = self.make_menu()

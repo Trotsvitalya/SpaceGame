@@ -254,7 +254,7 @@ class EnemyShip:
 
     # ---------------------------------------------------------------- fire
     def _fire(self, game):
-        player = game.player
+        player = game.target_player(self.posX, self.posY)
         tx = player.centerx if player.alive else VW * 0.5
         ty = player.centery if player.alive else VH
         base_angle = math.atan2(ty - self.posY, tx - self.posX)
@@ -504,7 +504,7 @@ class BossEnemy:
         )
 
     def _attack_fan(self, game, events):
-        player = game.player
+        player = game.target_player(self.posX, self.posY)
         base = math.atan2(player.centery - self.posY, player.centerx - self.posX)
         speed = self._bullet_speed()
         for offset in (-0.5, -0.25, 0.0, 0.25, 0.5):
@@ -516,7 +516,7 @@ class BossEnemy:
         game.audio.play("enemy_shot", 0.55, throttle_ms=80)
 
     def _attack_aimed(self, game, events):
-        player = game.player
+        player = game.target_player(self.posX, self.posY)
         if not player.alive:
             self._attack_fan(game, events)
             return
@@ -576,7 +576,7 @@ class BossEnemy:
 
     def _attack_zones(self, game, events):
         self.charge = 1.1
-        player = game.player
+        player = game.target_player(self.posX, self.posY)
         targets = [
             (player.centerx, player.centery),
             (player.centerx + 220, player.centery - 110),

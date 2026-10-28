@@ -26,7 +26,7 @@ SETTINGS_PATH = _settings_path()
 SCORES_PATH = _scores_path()
 
 DEFAULT_SETTINGS = {
-    "version": 5,
+    "version": 6,
     "music_volume": 0.55,
     "sfx_volume": 0.7,
     "muted": False,
@@ -40,7 +40,32 @@ DEFAULT_SETTINGS = {
     "effects_quality": 2,
     "reduced_flash": False,
     "auto_pause": True,
+    "player_name": "Pilot",
+    "last_host": "127.0.0.1",
+    "last_port": 47521,
 }
+
+
+def _as_text(value, default, limit, address=False):
+    if not isinstance(value, str):
+        return default
+    if address:
+        allowed = set("abcdefghijklmnopqrstuvwxyz"
+                      "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-_:")
+        cleaned = "".join(ch for ch in value if ch in allowed)
+    else:
+        cleaned = "".join(ch for ch in value if ch.isprintable()).strip()
+    return cleaned[:limit] or default
+
+
+def _as_port(value, default=47521):
+    if isinstance(value, bool):
+        return default
+    try:
+        port = int(value)
+    except (TypeError, ValueError):
+        return default
+    return port if 1 <= port <= 65535 else default
 
 
 def _as_float(value, default, low=0.0, high=1.0):
@@ -88,7 +113,7 @@ class Settings:
 
     def __init__(self, data=None):
         data = data if isinstance(data, dict) else {}
-        self.version = 5
+        self.version = 6
         self.music_volume = _as_float(data.get("music_volume"), DEFAULT_SETTINGS["music_volume"])
         self.sfx_volume = _as_float(data.get("sfx_volume"), DEFAULT_SETTINGS["sfx_volume"])
         self.muted = _as_bool(data.get("muted"), DEFAULT_SETTINGS["muted"])
@@ -106,6 +131,15 @@ class Settings:
             data.get("reduced_flash"), DEFAULT_SETTINGS["reduced_flash"]
         )
         self.auto_pause = _as_bool(data.get("auto_pause"), DEFAULT_SETTINGS["auto_pause"])
+        self.player_name = _as_text(
+            data.get("player_name"), DEFAULT_SETTINGS["player_name"], 24
+        )
+        self.last_host = _as_text(
+            data.get("last_host"), DEFAULT_SETTINGS["last_host"], 64, address=True
+        )
+        self.last_port = _as_port(
+            data.get("last_port"), DEFAULT_SETTINGS["last_port"]
+        )
 
     @classmethod
     def load(cls, path=None):
@@ -133,6 +167,9 @@ class Settings:
             "effects_quality": self.effects_quality,
             "reduced_flash": self.reduced_flash,
             "auto_pause": self.auto_pause,
+            "player_name": self.player_name,
+            "last_host": self.last_host,
+            "last_port": self.last_port,
         }
 
     def save(self, path=None):

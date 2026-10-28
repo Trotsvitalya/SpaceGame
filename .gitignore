@@ -10,6 +10,7 @@ env/
 # Generated at runtime
 settings.json
 scores.json
+campaign.json
 build/
 *.log
 

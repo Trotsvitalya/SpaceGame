@@ -20,14 +20,16 @@ from CampaignProgress import CampaignProgress
 from EffectsClass import Effects
 from GameData import SHIPS, SHIP_ORDER, WEAPONS, ZONES
 from Localization import LANGUAGE_NAMES, tr
+from NetCode import ClientSession, HostSession, local_ip
 from ResourcesClass import MEME_PALETTE, NORMAL_PALETTE, palette_for
 from SpaceBackdrop import SpaceBackdrop
-from UIClass import (Button, Choice, Slider, Toggle, WidgetGroup, draw_bar,
-                     draw_panel, draw_text)
+from UIClass import (Button, Choice, Slider, TextInput, Toggle, WidgetGroup,
+                     draw_bar, draw_panel, draw_text)
 from utils import VH, VW, clamp, format_score
 
 SCREENS = ("main", "mode", "hangar", "settings", "leaderboard", "controls",
-           "campaign", "campaign_brief")
+           "campaign", "campaign_brief", "multiplayer", "mp_host", "mp_join",
+           "mp_lobby")
 
 
 class MenuDeco:
@@ -115,6 +117,27 @@ class Menu:
         self.campaign_rows = []
         self.campaign_back_rect = pygame.Rect(0, 0, 0, 0)
         self.campaign_mission_id = None
+        # Multiplayer lobby state.  The menu owns the session until it is
+        # handed to a game scene; on_exit closes it only if that never happened.
+        self.mp_role = None
+        self.mp_session = None
+        self.mp_error = ""
+        self.mp_notice = ""
+        self.mp_connected = False
+        self.mp_peer_name = ""
+        self.mp_peer_ship = "fighter"
+        self.mp_host_name = ""
+        self.mp_handed_off = False
+        self.mp_start_info = {}
+        self.mp_form_name = self.settings.player_name
+        self.mp_form_address = self.settings.last_host
+        self.mp_form_port = str(self.settings.last_port)
+        self.mp_local_ip = "127.0.0.1"
+        self.mp_host_address = ""
+        self.mp_port_display = self.settings.last_port
+        self.mp_run_type = "endless"
+        self.mp_mission_ids = []
+        self.mp_mission_id = None
         self._build_screen(self.screen)
 
     # ------------------------------------------------------------ lifecycle
@@ -123,6 +146,8 @@ class Menu:
 
     def on_exit(self):
         self.audio.stop_music()
+        if not self.mp_handed_off:
+            self._close_mp_session()
 
     def _hover_sound(self):
         self.audio.play("ui_hover", 0.35, throttle_ms=55)
@@ -144,11 +169,12 @@ class Menu:
             x = 100
             y = 286
             width = 342
-            height = 48
-            gap = 55
+            height = 46
+            gap = 49
             specs = [
                 (tr(self.language, "new_game"), "new_game"),
                 (tr(self.language, "campaign"), "campaign"),
+                (tr(self.language, "multiplayer"), "multiplayer"),
                 (tr(self.language, "hangar"), "hangar"),
                 (tr(self.language, "leaderboard"), "leaderboard"),
                 (tr(self.language, "settings"), "settings"),
@@ -178,6 +204,12 @@ class Menu:
             self._build_campaign()
         elif name == "campaign_brief":
             self._build_campaign_brief()
+        elif name == "multiplayer":
+            self._build_multiplayer()
+        elif name in ("mp_host", "mp_join"):
+            self._build_mp_connect(name)
+        elif name == "mp_lobby":
+            self._build_mp_lobby()
 
     def _build_single_back(self):
         self.widgets = WidgetGroup([
@@ -375,6 +407,320 @@ class Menu:
             difficulty = getattr(self.settings, "difficulty", "normal")
         self.app.start_campaign(mission["id"], self.settings.mode, difficulty)
 
+    # ---------------------------------------------------------- multiplayer
+    @staticmethod
+    def _mp_panel():
+        return pygame.Rect(VW // 2 - 430, 122, 860, 536)
+
+    def _build_multiplayer(self):
+        cx = VW // 2
+        self.widgets = WidgetGroup([
+            Button((cx - 270, 246, 540, 58), tr(self.language, "mp_host"),
+                   "mp_host", size=22),
+            Button((cx - 270, 366, 540, 58), tr(self.language, "mp_join"),
+                   "mp_join", size=22),
+            Button((cx - 130, VH - 92, 260, 44), tr(self.language, "back"),
+                   "back", size=20),
+        ], on_hover=self._hover_sound)
+
+    def _build_mp_connect(self, name):
+        panel = self._mp_panel()
+        left = panel.x + 56
+        width = panel.width - 112
+        top = panel.y + 128
+        widgets = [
+            TextInput((left, top, width, 42), tr(self.language, "mp_name"),
+                      lambda: self.mp_form_name,
+                      lambda value: setattr(self, "mp_form_name", value),
+                      max_length=24, placeholder="Pilot"),
+        ]
+        if name == "mp_host":
+            self.mp_local_ip = local_ip()
+            unlocked = [mission_id for mission_id in MISSION_IDS
+                        if self.campaign_progress.is_unlocked(mission_id)]
+            if not unlocked:
+                unlocked = [MISSION_IDS[0]]
+            self.mp_mission_ids = unlocked
+            if self.mp_mission_id not in unlocked:
+                self.mp_mission_id = unlocked[0]
+            half = (width - 20) // 2
+            widgets += [
+                TextInput((left, top + 50, width, 42),
+                          tr(self.language, "mp_port"),
+                          lambda: self.mp_form_port,
+                          lambda value: setattr(self, "mp_form_port", value),
+                          max_length=5, numeric=True, placeholder="47521"),
+                Choice((left, top + 100, half, 42),
+                       lambda: tr(self.language, "mp_mode"),
+                       [("normal", tr(self.language, "mode_normal")),
+                        ("meme", tr(self.language, "mode_meme"))],
+                       lambda: 0 if self.settings.mode == "normal" else 1,
+                       self._set_mp_mode),
+                Choice((left + half + 20, top + 100, half, 42),
+                       lambda: tr(self.language, "mp_difficulty"),
+                       [(key, tr(self.language, "difficulty_" + key))
+                        for key in DIFFICULTY_ORDER],
+                       lambda: self._difficulty_index(),
+                       self._set_difficulty_index),
+                Choice((left, top + 150, width, 42),
+                       lambda: tr(self.language, "mp_run_type"),
+                       [("endless", tr(self.language, "mp_endless")),
+                        ("campaign", tr(self.language, "mp_campaign"))],
+                       lambda: 0 if self.mp_run_type == "endless" else 1,
+                       self._set_mp_run_type),
+            ]
+            if self.mp_run_type == "campaign":
+                widgets.append(Choice(
+                    (left, top + 200, width, 42),
+                    lambda: tr(self.language, "mp_mission"),
+                    [(index, mission_name(self.language,
+                                          mission_by_id(mission_id)))
+                     for index, mission_id in enumerate(self.mp_mission_ids)],
+                    lambda: (self.mp_mission_ids.index(self.mp_mission_id)
+                             if self.mp_mission_id in self.mp_mission_ids else 0),
+                    self._set_mp_mission_index,
+                ))
+            start_action = "mp_start_host"
+            start_label = tr(self.language, "mp_host_button")
+        else:
+            widgets += [
+                TextInput((left, top + 50, width, 42),
+                          tr(self.language, "mp_address"),
+                          lambda: self.mp_form_address,
+                          lambda value: setattr(self, "mp_form_address", value),
+                          max_length=64, address=True,
+                          placeholder="192.168.1.20"),
+                TextInput((left, top + 100, width, 42),
+                          tr(self.language, "mp_port"),
+                          lambda: self.mp_form_port,
+                          lambda value: setattr(self, "mp_form_port", value),
+                          max_length=5, numeric=True, placeholder="47521"),
+            ]
+            start_action = "mp_connect"
+            start_label = tr(self.language, "mp_connect")
+        widgets += [
+            Button((left, panel.y + 386, 360, 50), start_label,
+                   start_action, size=19),
+            Button((panel.right - 56 - 240, panel.y + 390, 240, 42),
+                   tr(self.language, "mp_cancel"), "mp_cancel", size=17),
+        ]
+        self.widgets = WidgetGroup(widgets, on_hover=self._hover_sound)
+
+    def _set_mp_mode(self, index):
+        self.settings.mode = "normal" if index == 0 else "meme"
+        self.settings.save()
+
+    def _set_mp_run_type(self, index):
+        self.mp_run_type = "campaign" if int(index) else "endless"
+        self.audio.play("ui_click", 0.4)
+        if self.screen == "mp_host":
+            self._build_screen("mp_host")
+
+    def _set_mp_mission_index(self, index):
+        if not self.mp_mission_ids:
+            return
+        index = max(0, min(len(self.mp_mission_ids) - 1, int(index)))
+        self.mp_mission_id = self.mp_mission_ids[index]
+        self.audio.play("ui_click", 0.4)
+
+    def _build_mp_lobby(self):
+        panel = self._mp_panel()
+        cx = VW // 2
+        widgets = []
+        if self.mp_error:
+            widgets.append(Button((cx - 190, panel.bottom - 126, 380, 50),
+                                  tr(self.language, "mp_retry"), "mp_retry",
+                                  size=19))
+        elif self.mp_role == "host":
+            widgets.append(Button((cx - 200, panel.bottom - 132, 400, 54),
+                                  tr(self.language, "mp_start_run"),
+                                  "mp_start_run", size=21))
+        widgets.append(Button((cx - 130, panel.bottom - 64, 260, 40),
+                              tr(self.language, "mp_leave"), "mp_leave",
+                              size=17))
+        self.widgets = WidgetGroup(widgets, on_hover=self._hover_sound)
+
+    def _form_port(self):
+        try:
+            port = int(str(self.mp_form_port).strip())
+        except (TypeError, ValueError):
+            return 0
+        return port if 1 <= port <= 65535 else 0
+
+    def _begin_host(self):
+        self._close_mp_session()
+        port = self._form_port()
+        name = (self.mp_form_name or "").strip()[:24] or "Pilot"
+        if not port:
+            self._set_mp_error(tr(self.language, "mp_error",
+                                  message="1-65535"))
+            return
+        self.settings.player_name = name
+        self.settings.last_port = port
+        self.settings.save()
+        session = HostSession(port, name)
+        actual = session.start()
+        if not actual:
+            message = session.error or "cannot listen"
+            session.close()
+            self._set_mp_error(tr(self.language, "mp_error", message=message))
+            return
+        self.mp_session = session
+        self.mp_role = "host"
+        self.mp_connected = False
+        self.mp_peer_name = ""
+        self.mp_peer_ship = "fighter"
+        self.mp_error = ""
+        self.mp_notice = ""
+        self.mp_local_ip = local_ip()
+        self.mp_port_display = actual
+        self.audio.play("ui_click", 0.5)
+        self._set_screen("mp_lobby")
+        self._refresh_mp_lobby()
+
+    def _begin_join(self):
+        self._close_mp_session()
+        address = (self.mp_form_address or "").strip()
+        port = self._form_port()
+        name = (self.mp_form_name or "").strip()[:24] or "Pilot"
+        if not address:
+            self._set_mp_error(tr(self.language, "mp_error",
+                                  message="host address is empty"))
+            return
+        if not port:
+            self._set_mp_error(tr(self.language, "mp_error",
+                                  message="1-65535"))
+            return
+        self.settings.player_name = name
+        self.settings.last_host = address
+        self.settings.last_port = port
+        self.settings.save()
+        session = ClientSession(address, port, name, ship=self.settings.ship)
+        self.mp_session = session
+        self.mp_role = "client"
+        self.mp_connected = False
+        self.mp_host_name = ""
+        self.mp_error = ""
+        self.mp_notice = ""
+        self.mp_host_address = address
+        self.mp_port_display = port
+        self.audio.play("ui_click", 0.5)
+        session.connect()
+        self._set_screen("mp_lobby")
+        self._refresh_mp_lobby()
+
+    def _set_mp_error(self, message):
+        self.mp_error = str(message or tr(self.language, "coop_link_lost"))[:160]
+        self.mp_connected = False
+        self.audio.play("low_health", 0.6)
+        self._refresh_mp_lobby()
+
+    def _refresh_mp_lobby(self):
+        if self.screen == "mp_lobby":
+            self._build_mp_lobby()
+
+    def _start_coop_run(self):
+        if (self.mp_role != "host" or self.mp_session is None
+                or not self.mp_session.connected):
+            self._set_mp_error(tr(self.language, "mp_waiting"))
+            return
+        mission_id = None
+        if self.mp_run_type == "campaign":
+            mission_id = self.mp_mission_id
+            if (not mission_id
+                    or not self.campaign_progress.is_unlocked(mission_id)):
+                self._set_mp_error(tr(
+                    self.language, "mp_error",
+                    message=tr(self.language, "campaign_mission_locked"),
+                ))
+                return
+        self._click_sound()
+        client_name = self.mp_session.client_name or self.mp_peer_name or "Pilot"
+        client_ship = self.mp_session.client_ship or self.mp_peer_ship or "fighter"
+        self.mp_handed_off = True
+        mission = self.app.start_coop_host(
+            self.mp_session, self.settings.mode, self.settings.difficulty,
+            mission_id=mission_id, client_name=client_name,
+            client_ship=client_ship,
+        )
+        if mission is None and mission_id:
+            self.mp_handed_off = False
+            self._set_mp_error(tr(
+                self.language, "mp_error",
+                message=tr(self.language, "campaign_mission_locked"),
+            ))
+
+    def _retry_mp(self):
+        role = self.mp_role
+        self._close_mp_session()
+        self.mp_error = ""
+        self.mp_notice = ""
+        self._set_screen("mp_join" if role == "client" else "mp_host")
+
+    def _leave_mp(self):
+        self._close_mp_session()
+        self.mp_error = ""
+        self.mp_notice = ""
+        self._set_screen("multiplayer")
+
+    def _close_mp_session(self):
+        session = self.mp_session
+        role = self.mp_role
+        self.mp_session = None
+        self.mp_connected = False
+        if session is None:
+            return
+        try:
+            if session.connected and hasattr(session, "send_leave"):
+                session.send_leave("host left" if role == "host"
+                                   else "client returned to menu")
+            else:
+                session.close()
+        except OSError:
+            pass
+
+    def _update_mp_lobby(self):
+        session = self.mp_session
+        if session is None or self.mp_handed_off:
+            return
+        if session.connected:
+            session.heartbeat()
+        for message in session.poll():
+            kind = message.get("t")
+            if kind == "peer_joined":
+                self.mp_connected = True
+                self.mp_peer_name = str(message.get("name") or "Pilot")[:24]
+                self.mp_peer_ship = message.get("ship", "fighter")
+                self.mp_notice = tr(self.language, "mp_connected")
+                self.audio.play("powerup", 0.6)
+                self._refresh_mp_lobby()
+            elif kind == "welcome":
+                self.mp_connected = True
+                self.mp_host_name = str(message.get("host_name") or "Host")[:24]
+                self.mp_notice = tr(self.language, "mp_connected")
+                self.audio.play("powerup", 0.6)
+                self._refresh_mp_lobby()
+            elif kind == "start":
+                if self.mp_role == "client":
+                    self.mp_start_info = dict(message)
+                    self.mp_handed_off = True
+                    self.app.start_coop_client(self.mp_session, message)
+                    return
+            elif kind == "error":
+                self._set_mp_error(tr(
+                    self.language, "mp_error",
+                    message=message.get("message") or message.get("code")
+                    or session.error or "connection error",
+                ))
+            elif kind in ("peer_left", "leave"):
+                reason = (message.get("reason") or session.error
+                          or tr(self.language, "coop_link_lost"))
+                self._set_mp_error(tr(self.language, "mp_error",
+                                      message=reason))
+        if session.state == "error" and not self.mp_error:
+            self._set_mp_error(tr(self.language, "mp_error",
+                                  message=session.error or "connection error"))
+
     def _set_language_index(self, index):
         self.settings.language = "uk" if index == 0 else "en"
         self.language = self.settings.language
@@ -423,6 +769,9 @@ class Menu:
             return
         if self.screen == "campaign_brief":
             self._handle_campaign_brief_event(event, mouse)
+            return
+        if self.screen == "multiplayer" or self.screen.startswith("mp_"):
+            self._handle_mp_event(event, mouse)
             return
 
         if self.screen == "mode":
@@ -542,6 +891,27 @@ class Menu:
             if action:
                 self._handle_action(action)
 
+    def _handle_mp_event(self, event, mouse):
+        if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
+            if self.screen == "multiplayer":
+                self._set_screen("main")
+            elif self.screen in ("mp_host", "mp_join"):
+                self._set_screen("multiplayer")
+            else:
+                self._leave_mp()
+            return
+        if (self.screen == "mp_lobby" and event.type == pygame.KEYDOWN
+                and event.key in (pygame.K_RETURN, pygame.K_KP_ENTER)):
+            if self.mp_error:
+                self._retry_mp()
+            elif self.mp_role == "host" and self.mp_connected:
+                self._start_coop_run()
+            return
+        if self.widgets is not None:
+            action = self.widgets.handle_event(event, mouse)
+            if action:
+                self._handle_action(action)
+
     def _handle_action(self, action):
         if action == "quit":
             self._click_sound()
@@ -550,6 +920,26 @@ class Menu:
             self._set_screen("mode")
         elif action == "campaign":
             self._set_screen("campaign")
+        elif action == "multiplayer":
+            self._set_screen("multiplayer")
+        elif action == "mp_host":
+            self.mp_error = ""
+            self._set_screen("mp_host")
+        elif action == "mp_join":
+            self.mp_error = ""
+            self._set_screen("mp_join")
+        elif action == "mp_start_host":
+            self._begin_host()
+        elif action == "mp_connect":
+            self._begin_join()
+        elif action == "mp_start_run":
+            self._start_coop_run()
+        elif action == "mp_retry":
+            self._retry_mp()
+        elif action == "mp_leave":
+            self._leave_mp()
+        elif action == "mp_cancel":
+            self._set_screen("multiplayer")
         elif action == "campaign_back":
             self._set_screen("campaign")
         elif action == "campaign_start":
@@ -594,6 +984,8 @@ class Menu:
                     center[1] + 104 + random.uniform(-3, 3),
                     SHIPS[self.settings.ship]["accent"], 0.55,
                 )
+        if self.screen == "mp_lobby" and not self.mp_handed_off:
+            self._update_mp_lobby()
 
     def _hero_center(self):
         return (VW - 330, 352 + int(math.sin(self.time * 1.2) * 8))
@@ -631,6 +1023,12 @@ class Menu:
             self._draw_campaign(canvas)
         elif self.screen == "campaign_brief":
             self._draw_campaign_brief(canvas)
+        elif self.screen == "multiplayer":
+            self._draw_multiplayer(canvas)
+        elif self.screen in ("mp_host", "mp_join"):
+            self._draw_mp_connect(canvas)
+        elif self.screen == "mp_lobby":
+            self._draw_mp_lobby(canvas)
 
         if self.screen_fade > 0:
             overlay = pygame.Surface((VW, VH), pygame.SRCALPHA)
@@ -1116,6 +1514,187 @@ class Menu:
         draw_text(canvas, self.resources, tr(self.language, "campaign_brief_hint"),
                   11, palette["muted"], (VW // 2, panel.bottom - 22),
                   anchor="center")
+
+    def _draw_multiplayer(self, canvas):
+        palette = self.palette
+        cx = VW // 2
+        draw_text(canvas, self.resources, tr(self.language, "mp_title"), 42,
+                  palette["text"], (cx, 40), anchor="center", shadow=(2, 6, 16))
+        draw_text(canvas, self.resources, tr(self.language, "mp_subtitle"), 15,
+                  palette["accent"], (cx, 84), anchor="center")
+        panel = pygame.Rect(cx - 520, 122, 1040, 470)
+        draw_panel(canvas, panel, (*palette["panel"], 226), palette["border"],
+                   16, 2)
+        for index, key in enumerate(("mp_host_desc", "mp_join_desc")):
+            lines = self.resources.wrap_text(tr(self.language, key), 14, 820)
+            y = panel.y + 190 + index * 120
+            for line in lines[:2]:
+                draw_text(canvas, self.resources, line, 14, palette["text"],
+                          (cx, y), anchor="center", alpha=220)
+                y += 20
+        draw_text(canvas, self.resources, tr(self.language, "mp_lan_hint"), 13,
+                  palette["warning"], (cx, panel.bottom - 76), anchor="center")
+        draw_text(canvas, self.resources, tr(self.language, "mp_network_note"),
+                  11, palette["muted"], (cx, panel.bottom - 48), anchor="center")
+        self.widgets.draw(canvas, self.resources, palette)
+        draw_text(canvas, self.resources, tr(self.language, "focus_hint"), 11,
+                  palette["muted"], (cx, VH - 22), anchor="center")
+
+    def _draw_mp_connect(self, canvas):
+        palette = self.palette
+        cx = VW // 2
+        hosting = self.screen == "mp_host"
+        title_key = "mp_host" if hosting else "mp_join"
+        desc_key = "mp_host_desc" if hosting else "mp_join_desc"
+        draw_text(canvas, self.resources, tr(self.language, title_key), 38,
+                  palette["text"], (cx, 38), anchor="center", shadow=(2, 6, 16))
+        draw_text(canvas, self.resources, tr(self.language, desc_key), 13,
+                  palette["muted"], (cx, 80), anchor="center")
+        panel = self._mp_panel()
+        draw_panel(canvas, panel, (*palette["panel"], 230), palette["border"],
+                   16, 2)
+        self.widgets.draw(canvas, self.resources, palette)
+        info_y = panel.y + 440
+        if hosting:
+            draw_text(canvas, self.resources,
+                      tr(self.language, "mp_ip_hint", ip=self.mp_local_ip), 13,
+                      palette["accent"], (panel.x + 56, info_y))
+            draw_text(canvas, self.resources, tr(self.language, "mp_lan_hint"),
+                      11, palette["muted"], (panel.x + 56, info_y + 22))
+        else:
+            draw_text(canvas, self.resources, tr(self.language, "mp_lan_hint"),
+                      11, palette["muted"], (panel.x + 56, info_y + 10))
+        if self.mp_error:
+            lines = self.resources.wrap_text(self.mp_error, 13, panel.width - 120)
+            for index, line in enumerate(lines[:2]):
+                draw_text(canvas, self.resources, line, 13, palette["danger"],
+                          (panel.x + 56, info_y + 46 + index * 18))
+        else:
+            draw_text(canvas, self.resources, tr(self.language, "mp_network_note"),
+                      11, palette["muted"], (panel.x + 56, info_y + 46))
+        draw_text(canvas, self.resources, tr(self.language, "mp_start_hint"), 11,
+                  palette["muted"], (cx, VH - 22), anchor="center")
+
+    def _draw_mp_lobby(self, canvas):
+        palette = self.palette
+        cx = VW // 2
+        hosting = self.mp_role == "host"
+        title_key = "mp_lobby_host" if hosting else "mp_lobby_client"
+        draw_text(canvas, self.resources, tr(self.language, title_key), 34,
+                  palette["text"], (cx, 38), anchor="center", shadow=(2, 6, 16))
+        panel = self._mp_panel()
+        draw_panel(canvas, panel, (*palette["panel"], 232),
+                   palette["danger"] if self.mp_error else palette["border"],
+                   16, 2)
+        left = panel.x + 56
+        right = panel.right - 56
+
+        status_color = (palette["success"] if self.mp_connected
+                        else palette["warning"])
+        if self.mp_error:
+            status = tr(self.language, "mp_error", message="")
+            status_color = palette["danger"]
+        elif self.mp_connected:
+            status = tr(self.language, "mp_connected")
+        elif hosting:
+            status = tr(self.language, "mp_waiting")
+        else:
+            status = tr(self.language, "mp_connecting")
+        draw_text(canvas, self.resources, status, 24, status_color,
+                  (cx, panel.y + 54), anchor="center")
+
+        if hosting:
+            draw_text(canvas, self.resources, tr(self.language, "mp_host_label"),
+                      11, palette["muted"], (left, panel.y + 106))
+            draw_text(canvas, self.resources,
+                      f"{self.settings.player_name} · "
+                      f"{tr(self.language, SHIPS[self.settings.ship]['name'])}",
+                      17, palette["text"], (left, panel.y + 122))
+            draw_text(canvas, self.resources,
+                      tr(self.language, "mp_ip_hint", ip=self.mp_local_ip), 14,
+                      palette["accent"], (left, panel.y + 164))
+            draw_text(canvas, self.resources,
+                      f"{tr(self.language, 'mp_port')}: "
+                      f"{self.mp_port_display}", 14, palette["accent"],
+                      (left, panel.y + 188))
+            draw_text(canvas, self.resources,
+                      tr(self.language, "mp_join_hint"), 11, palette["muted"],
+                      (left, panel.y + 218))
+            run_key = ("mp_campaign" if self.mp_run_type == "campaign"
+                       else "mp_endless")
+            draw_text(canvas, self.resources,
+                      f"{tr(self.language, 'mp_run_type')}: "
+                      f"{tr(self.language, run_key)}", 13,
+                      palette["accent2"], (left, panel.y + 250))
+            if self.mp_run_type == "campaign":
+                mission = mission_by_id(self.mp_mission_id)
+                if mission is not None:
+                    draw_text(canvas, self.resources,
+                              f"{tr(self.language, 'mp_mission')}: "
+                              f"{mission_name(self.language, mission)}", 13,
+                              palette["text"], (left, panel.y + 274))
+            draw_text(canvas, self.resources,
+                      tr(self.language, "mp_client_label"), 11,
+                      palette["muted"], (right, panel.y + 106))
+            if self.mp_connected:
+                partner = self.mp_peer_name or "Pilot"
+                ship_name = tr(self.language, SHIPS.get(
+                    self.mp_peer_ship, SHIPS["fighter"])["name"])
+                draw_text(canvas, self.resources, f"{partner} · {ship_name}", 17,
+                          palette["text"], (right, panel.y + 122),
+                          anchor="topright")
+                draw_text(canvas, self.resources, tr(self.language, "mp_press_start"),
+                          12, palette["success"], (right, panel.y + 164),
+                          anchor="topright")
+            else:
+                draw_text(canvas, self.resources,
+                          tr(self.language, "mp_waiting_short"), 17,
+                          palette["muted"], (right, panel.y + 122),
+                          anchor="topright")
+        else:
+            draw_text(canvas, self.resources, tr(self.language, "mp_client_label"),
+                      11, palette["muted"], (left, panel.y + 106))
+            draw_text(canvas, self.resources,
+                      f"{self.settings.player_name} · "
+                      f"{tr(self.language, SHIPS[self.settings.ship]['name'])}",
+                      17, palette["text"], (left, panel.y + 122))
+            draw_text(canvas, self.resources,
+                      f"{tr(self.language, 'mp_address')}: "
+                      f"{self.mp_host_address}", 14, palette["accent"],
+                      (left, panel.y + 164))
+            draw_text(canvas, self.resources,
+                      f"{tr(self.language, 'mp_port')}: "
+                      f"{self.mp_port_display}", 14, palette["accent"],
+                      (left, panel.y + 188))
+            draw_text(canvas, self.resources, tr(self.language, "mp_client_wait"),
+                      12, palette["muted"], (left, panel.y + 222))
+            draw_text(canvas, self.resources, tr(self.language, "mp_host_label"),
+                      11, palette["muted"], (right, panel.y + 106))
+            if self.mp_connected:
+                draw_text(canvas, self.resources, self.mp_host_name or "Host", 17,
+                          palette["text"], (right, panel.y + 122),
+                          anchor="topright")
+            else:
+                draw_text(canvas, self.resources,
+                          tr(self.language, "mp_waiting_short"), 17,
+                          palette["muted"], (right, panel.y + 122),
+                          anchor="topright")
+
+        if self.mp_error:
+            lines = self.resources.wrap_text(self.mp_error, 13, panel.width - 120)
+            y = panel.bottom - 182
+            for line in lines[:2]:
+                draw_text(canvas, self.resources, line, 13, palette["danger"],
+                          (cx, y), anchor="center")
+                y += 18
+            draw_text(canvas, self.resources, tr(self.language, "coop_reconnect_hint"),
+                      11, palette["muted"], (cx, panel.bottom - 210),
+                      anchor="center")
+        self.widgets.draw(canvas, self.resources, palette)
+        if not self.mp_error:
+            hint = ("mp_start_hint" if hosting else "mp_join_hint_keys")
+            draw_text(canvas, self.resources, tr(self.language, hint), 11,
+                      palette["muted"], (cx, VH - 22), anchor="center")
 
     def _draw_controls(self, canvas):
         palette = self.palette

@@ -7,6 +7,8 @@ import pygame
 from AudioClass import AudioManager, MUSIC_END_EVENT
 from CampaignData import mission_by_id
 from CampaignProgress import CampaignProgress
+from CoopClientScene import CoopClientScene
+from CoopGame import CoopHostGame
 from GameProcessClass import GameProcess
 from MenuClass import Menu
 from ResourcesClass import Resources
@@ -190,6 +192,41 @@ class App:
 
     def go_campaign(self, screen="campaign"):
         self.transition_to(lambda: Menu(self, initial_screen=screen))
+
+    def go_multiplayer(self, screen="multiplayer"):
+        self.transition_to(lambda: Menu(self, initial_screen=screen))
+
+    # ----------------------------------------------------------- co-op
+    def start_coop_host(self, session, mode=None, difficulty=None,
+                        mission_id=None, client_name="Pilot",
+                        client_ship="fighter"):
+        """Hand a live host session to the two-ship simulation."""
+        mode = mode if mode in ("normal", "meme") else self.settings.mode
+        difficulty = (difficulty or getattr(self.settings, "difficulty", "normal"))
+        mission = mission_by_id(mission_id) if mission_id else None
+        progress = None
+        if mission is not None:
+            # The host is authoritative for campaign progress and unlocks.
+            if not self.campaign_progress.is_unlocked(mission["id"]):
+                return None
+            progress = self.campaign_progress
+            progress.begin_mission(
+                mission["id"], ship=self.settings.ship,
+                difficulty=difficulty,
+            )
+        self.settings.mode = mode
+        self.settings.difficulty = difficulty
+        self.settings.save()
+        self.transition_to(lambda: CoopHostGame(
+            self, session, mode=mode, difficulty=difficulty,
+            mission=mission, progress=progress,
+            client_name=client_name, client_ship=client_ship,
+        ))
+        return mission
+
+    def start_coop_client(self, session, start_info=None):
+        """Render a host-authoritative run on this machine."""
+        self.transition_to(lambda: CoopClientScene(self, session, start_info))
 
     def quit(self):
         self.running = False

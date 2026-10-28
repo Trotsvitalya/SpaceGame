@@ -246,6 +246,89 @@ class Choice:
                   palette["text"], box.center, anchor="center")
 
 
+class TextInput:
+    """Small single-line text field used by the multiplayer screens.
+
+    Text is fed through ``pygame.TEXTINPUT`` for proper Unicode handling;
+    backspace/delete are handled from ``KEYDOWN``.  Values are always
+    sanitised before they reach the settings object, so a hand-edited or pasted
+    string can never inject control characters into the network layer.
+    """
+
+    def __init__(self, rect, label, get_value, set_value, max_length=32,
+                 numeric=False, address=False, placeholder="", on_change=None):
+        self.rect = pygame.Rect(rect)
+        self.label = label
+        self.get_value = get_value
+        self.set_value = set_value
+        self.max_length = max(1, int(max_length))
+        self.numeric = numeric
+        self.address = address
+        self.placeholder = placeholder
+        self.on_change = on_change
+        self.hovered = False
+        self.active = False
+
+    def value(self):
+        try:
+            text = self.get_value()
+        except (TypeError, ValueError):
+            text = ""
+        return str(text or "")[:self.max_length]
+
+    def sanitize(self, text):
+        text = str(text or "")
+        if self.numeric:
+            cleaned = "".join(ch for ch in text if ch.isdigit())
+        elif self.address:
+            allowed = set("abcdefghijklmnopqrstuvwxyz"
+                          "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-_:")
+            cleaned = "".join(ch for ch in text if ch in allowed)
+        else:
+            cleaned = "".join(ch for ch in text if ch.isprintable())
+        return cleaned[:self.max_length]
+
+    def set_text(self, text):
+        self.set_value(self.sanitize(text))
+        if self.on_change:
+            self.on_change()
+
+    def insert(self, text):
+        self.set_text(self.value() + str(text or ""))
+
+    def backspace(self):
+        self.set_text(self.value()[:-1])
+
+    def activate(self):
+        self.active = True
+        return None
+
+    def adjust(self, step):
+        return None
+
+    def draw(self, surface, resources, palette, focused):
+        label_color = palette["accent"] if focused else palette["text"]
+        draw_text(surface, resources, _text_of(self.label), 20, label_color,
+                  (self.rect.x + 14, self.rect.centery), anchor="midleft")
+        box = pygame.Rect(self.rect.x + 235, self.rect.centery - 16,
+                          self.rect.width - 315, 32)
+        pygame.draw.rect(surface, (18, 26, 44), box, border_radius=8)
+        pygame.draw.rect(surface, palette["accent"] if focused else palette["border"],
+                         box, width=2 if focused else 1, border_radius=8)
+        text = self.value()
+        if text:
+            draw_text(surface, resources, text, 15, palette["text"],
+                      (box.x + 12, box.centery), anchor="midleft")
+        else:
+            draw_text(surface, resources, self.placeholder, 14, palette["muted"],
+                      (box.x + 12, box.centery), anchor="midleft")
+        if focused and (pygame.time.get_ticks() // 450) % 2 == 0:
+            width = min(box.width - 24, resources.font(15).size(text)[0])
+            caret_x = box.x + 12 + width + 1
+            pygame.draw.line(surface, palette["accent"],
+                             (caret_x, box.y + 7), (caret_x, box.bottom - 7), 2)
+
+
 class WidgetGroup:
     """Keyboard + mouse focus management for a vertical list of widgets."""
 
@@ -306,10 +389,31 @@ class WidgetGroup:
                 if self.on_hover:
                     self.on_hover()
                 return widget.activate()
+        elif event.type == pygame.TEXTINPUT:
+            widget = self.widgets[self.selected] if self.widgets else None
+            if isinstance(widget, TextInput):
+                widget.insert(event.text)
+            return None
         elif event.type == pygame.KEYDOWN:
-            if event.key in (pygame.K_UP, pygame.K_w):
+            widget = self.widgets[self.selected] if self.widgets else None
+            is_text = isinstance(widget, TextInput)
+            if is_text:
+                if event.key == pygame.K_BACKSPACE:
+                    widget.backspace()
+                    return None
+                if event.key == pygame.K_DELETE:
+                    widget.set_text("")
+                    return None
+                if event.key in (pygame.K_RETURN, pygame.K_KP_ENTER):
+                    # Enter moves to the next field/button instead of firing
+                    # the field, so forms remain keyboard-only friendly.
+                    self._select(self.selected + 1)
+                    return None
+                if event.key == pygame.K_SPACE:
+                    return None
+            if event.key in (pygame.K_UP, pygame.K_w) and not is_text:
                 self._select(self.selected - 1)
-            elif event.key in (pygame.K_DOWN, pygame.K_s):
+            elif event.key in (pygame.K_DOWN, pygame.K_s) and not is_text:
                 self._select(self.selected + 1)
             elif event.key == pygame.K_TAB:
                 step = -1 if event.mod & pygame.KMOD_SHIFT else 1
