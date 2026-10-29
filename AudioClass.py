@@ -28,6 +28,7 @@ ASSET_SOUNDS = {
     "meme_envelopes": "envelopes.mp3",
     "meme_dragon": "dragon.mp3",
     "meme_boat": "boat.mp3",
+    "meme_coffin_dance": "coffin_dance.mp3",
 }
 
 
@@ -301,12 +302,14 @@ class AudioManager:
             return False
 
     def play_coffin_dance(self):
-        """Loop the original synthesized dance beat while its event is active."""
+        """Loop the supplied Coffin Dance track while its event is active."""
         if not self.enabled or self.settings.muted or self.coffin_channel is None:
             return False
         try:
             if self.coffin_channel.get_busy():
                 return True
+            if self.coffin_sound is None:
+                self.coffin_sound = self.sounds.get("meme_coffin_dance")
             if self.coffin_sound is None:
                 self.coffin_sound = make_coffin_dance_loop()
             if self.coffin_sound is None:
