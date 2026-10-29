@@ -83,6 +83,10 @@ def build_snapshot(game, names):
         "display_score": int(game.display_score),
         "kills": int(game.kills),
         "salvage": int(game.salvage),
+        "meme_points": int(getattr(game, "meme_points", 0)),
+        "superpower_charges": dict(getattr(
+            game, "superpower_charges", {"tiger": 0, "chainsaw": 0}
+        )),
         "boss": None,
         "players": [
             _ship_state(game.player, 0, names[0]),
@@ -101,6 +105,13 @@ def build_snapshot(game, names):
             "phase_time": round(game.tiger_ultimate.phase_time, 3),
             "struck": bool(game.tiger_ultimate.struck),
         } if game.tiger_ultimate.active else None),
+        "chainsaw": ({
+            "phase": game.chainsaw.phase,
+            "phase_time": round(game.chainsaw.phase_time, 3),
+            "elapsed": round(game.chainsaw.elapsed, 3),
+            "saws": [[round(saw[0], 1), round(saw[1], 1)]
+                     for saw in game.chainsaw.saws],
+        } if game.chainsaw.active else None),
         "story": story,
         "upgrade": None,
         "result": (game.campaign_result if state == "victory"
@@ -318,6 +329,10 @@ class CoopHostGame(GameProcess):
                 if self.state == "story":
                     self._advance_story()
                     self._send_snapshot()
+                continue
+            if kind == "superpower":
+                if self.mode == "meme" and self.state == "playing":
+                    self._buy_or_activate_superpower(message.get("kind"))
                 continue
             if kind == "peer_joined":
                 continue

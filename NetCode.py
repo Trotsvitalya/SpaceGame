@@ -42,7 +42,7 @@ MAX_MESSAGES_PER_SECOND = 240
 
 CLIENT_MESSAGE_TYPES = frozenset(
     {"hello", "input", "ping", "pong", "leave", "pause_request",
-     "story_skip"}
+     "story_skip", "superpower"}
 )
 HOST_MESSAGE_TYPES = frozenset(
     {"welcome", "start", "state", "result", "ping", "pong", "error", "leave"}
@@ -164,6 +164,11 @@ def validate_client_message(message):
                                       "left")}
     if kind == "story_skip":
         return {"t": "story_skip"}
+    if kind == "superpower":
+        power = message.get("kind")
+        if power not in ("tiger", "chainsaw"):
+            raise ProtocolError("unknown superpower")
+        return {"t": "superpower", "kind": power}
     return {"t": "pause_request"}
 
 
@@ -552,6 +557,9 @@ class HostSession(_BaseSession):
                         self._post({"t": "pause_request"})
                     elif message["t"] == "story_skip":
                         self._post({"t": "peer_story_skip"})
+                    elif message["t"] == "superpower":
+                        self._post({"t": "superpower",
+                                    "kind": message["kind"]})
         finally:
             if not self._closed and not self._stop.is_set():
                 self._fail("connection closed")
@@ -748,6 +756,11 @@ class ClientSession(_BaseSession):
 
     def send_story_skip(self):
         return self._queue_message({"t": "story_skip"})
+
+    def send_superpower(self, kind):
+        if kind not in ("tiger", "chainsaw") or not self.connected:
+            return False
+        return self._queue_message({"t": "superpower", "kind": kind})
 
     def send_leave(self, reason="left"):
         try:

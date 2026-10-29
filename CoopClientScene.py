@@ -15,6 +15,7 @@ import time
 import pygame
 
 from GameData import SHIPS, UPGRADES, WEAPONS
+from ChainsawUltimate import ChainsawUltimate
 from Hazards import BeamAttack, DangerZone
 from Localization import tr
 from PowerUpClass import PowerUp
@@ -83,6 +84,8 @@ class CoopClientScene:
         self._overlay_buttons = []
         self._music_stopped = False
         self.tiger_ultimate = TigerUltimate()
+        self.chainsaw = ChainsawUltimate()
+        self._remote_chainsaw_sound_timer = 0.0
         self._tiger_paused = False
         self._tiger_resume_pending = False
 
@@ -144,6 +147,11 @@ class CoopClientScene:
             if self.state != "paused":
                 self.tiger_ultimate._update_particles(dt)
             return
+        if self.chainsaw.chasing:
+            self._remote_chainsaw_sound_timer -= dt
+            if self._remote_chainsaw_sound_timer <= 0:
+                self.audio.play("chainsaw", 0.55)
+                self._remote_chainsaw_sound_timer = 1.1
         if (self._tiger_resume_pending
                 and not self.audio.tiger_ultimate_busy()):
             self.audio.resume_music()
@@ -196,6 +204,7 @@ class CoopClientScene:
                      "victory", "gameover", "waiting"):
             self._set_state(state)
         self._sync_tiger(snapshot.get("tiger"), snapshot.get("mode"))
+        self._sync_chainsaw(snapshot.get("chainsaw"))
         if snapshot.get("result") and not self.result:
             self.result = snapshot["result"]
         story = snapshot.get("story")
@@ -204,6 +213,39 @@ class CoopClientScene:
             if key != self.story_key:
                 self.story_key = key
                 self.audio.play("ui_click", 0.35, throttle_ms=180)
+
+    def _sync_chainsaw(self, state):
+        valid_phases = {"split", "chase", "finish"}
+        active = isinstance(state, dict) and state.get("phase") in valid_phases
+        if not active:
+            if self.chainsaw.active:
+                self.chainsaw.cancel()
+                self.audio.resume_music()
+            return
+
+        if not self.chainsaw.active:
+            self.audio.pause_music()
+            self.audio.play("chainsaw", 0.85)
+            self._remote_chainsaw_sound_timer = 1.1
+        self.chainsaw.phase = state["phase"]
+        try:
+            self.chainsaw.phase_time = clamp(float(state.get("phase_time", 0)),
+                                              0.0, 2.0)
+            self.chainsaw.elapsed = clamp(float(state.get("elapsed", 0)),
+                                          0.0, 20.0)
+        except (TypeError, ValueError):
+            self.chainsaw.phase_time = self.chainsaw.elapsed = 0.0
+        saws = state.get("saws") or []
+        self.chainsaw.saws = []
+        for saw in saws[:ChainsawUltimate.SAW_COUNT]:
+            if not isinstance(saw, (list, tuple)) or len(saw) < 2:
+                continue
+            try:
+                x = clamp(float(saw[0]), -100.0, VW + 100.0)
+                y = clamp(float(saw[1]), -100.0, VH + 100.0)
+            except (TypeError, ValueError):
+                continue
+            self.chainsaw.saws.append([x, y, None])
 
     def _sync_tiger(self, tiger, mode):
         active = (mode == "meme" and isinstance(tiger, dict)
@@ -312,6 +354,14 @@ class CoopClientScene:
             return
 
         if event.type == pygame.KEYDOWN:
+            if (event.key in (pygame.K_1, pygame.K_2)
+                    and self.mode == "meme" and self.state == "playing"
+                    and self.net is not None):
+                self.net.send_superpower(
+                    "tiger" if event.key == pygame.K_1 else "chainsaw"
+                )
+                self.audio.play("ui_click", 0.45, throttle_ms=80)
+                return
             if event.key == pygame.K_ESCAPE:
                 self.local_menu = True
                 self.overlay_time = 0.0
@@ -373,6 +423,8 @@ class CoopClientScene:
         if snapshot is not None:
             self._draw_world(canvas, snapshot)
         canvas.blit(self.resources.vignette, (0, 0))
+        if self.chainsaw.active:
+            self.chainsaw.draw(canvas)
         if snapshot is not None:
             self._draw_hud(canvas, snapshot)
         if self.tiger_ultimate.active:
@@ -599,6 +651,8 @@ class CoopClientScene:
             self._draw_boss_bar(canvas, boss)
 
         self._draw_coop_panel(canvas, snapshot)
+        if snapshot.get("mode") == "meme":
+            self._draw_superpower_shop(canvas, snapshot)
 
         local = self._local_player()
         if local:
@@ -644,6 +698,61 @@ class CoopClientScene:
                 draw_text(canvas, self.resources, announce["sub"], 20,
                           palette["text"], (VW // 2, VH * 0.30 + 44),
                           anchor="center", alpha=alpha)
+
+    def _draw_superpower_shop(self, canvas, snapshot):
+        points = max(0, int(snapshot.get("meme_points", 0)))
+        charges = snapshot.get("superpower_charges") or {}
+        items = (("tiger", "1", (255, 188, 66), 4000),
+                 ("chainsaw", "2", (255, 112, 48), 1800))
+        for index, (kind, key, color, cost) in enumerate(items):
+            x = VW - 480 + index * 100
+            rect = pygame.Rect(x, 14, 92, 54)
+            charged = max(0, int(charges.get(kind, 0))) > 0
+            ratio = (1.0 if charged else clamp(points / cost, 0.0, 1.0))
+            border = color if charged or ratio >= 1.0 else self.palette["border"]
+            draw_panel(canvas, rect, (*self.palette["panel"], 225), border,
+                       8, 2 if charged else 1)
+            draw_text(canvas, self.resources, key, 12, color,
+                      (rect.x + 6, rect.y + 3))
+            if kind == "tiger":
+                pygame.draw.circle(canvas, color, (rect.centerx, rect.y + 22), 13)
+                pygame.draw.polygon(canvas, color,
+                                    ((rect.centerx - 10, rect.y + 15),
+                                     (rect.centerx - 8, rect.y + 7),
+                                     (rect.centerx - 2, rect.y + 14)))
+                pygame.draw.polygon(canvas, color,
+                                    ((rect.centerx + 10, rect.y + 15),
+                                     (rect.centerx + 8, rect.y + 7),
+                                     (rect.centerx + 2, rect.y + 14)))
+            else:
+                cy = rect.y + 22
+                pygame.draw.rect(canvas, color,
+                                 (rect.centerx - 17, cy - 6, 25, 12),
+                                 border_radius=4)
+                pygame.draw.circle(canvas, (218, 226, 230),
+                                   (rect.centerx + 8, cy), 10, 3)
+                for tooth in range(8):
+                    angle = self.time * 8 + tooth * math.tau / 8
+                    start = (rect.centerx + 8 + math.cos(angle) * 7,
+                             cy + math.sin(angle) * 7)
+                    end = (rect.centerx + 8 + math.cos(angle + .1) * 13,
+                           cy + math.sin(angle + .1) * 13)
+                    pygame.draw.line(canvas, color, start, end, 2)
+            label_key = ("superpower_tiger" if kind == "tiger"
+                         else "superpower_chainsaw")
+            draw_text(canvas, self.resources, tr(self.language, label_key), 10,
+                      self.palette["text"], (rect.centerx, rect.y + 31),
+                      anchor="midtop")
+            value = (f"x{max(0, int(charges.get(kind, 0)))}" if charged
+                     else format_score(cost))
+            draw_text(canvas, self.resources, value, 10,
+                      color if charged or ratio >= 1.0 else self.palette["muted"],
+                      (rect.right - 5, rect.y + 3), anchor="topright")
+            draw_bar(canvas, (rect.x + 7, rect.bottom - 8, rect.width - 14, 5),
+                     ratio, color, (28, 34, 54), None, 1)
+        draw_text(canvas, self.resources,
+                  f"{tr(self.language, 'meme_wallet')}: {format_score(points)}",
+                  10, self.palette["muted"], (VW - 480, 69))
 
     def _draw_boss_bar(self, canvas, boss):
         palette = self.palette
