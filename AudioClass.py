@@ -319,7 +319,9 @@ class AudioManager:
                 return 0.0
             if not self.coffin_loops:
                 self.coffin_duration = self.coffin_sound.get_length()
-            self.coffin_channel.set_volume(self._music_volume() * 0.72)
+            # Coffin Dance is a meme sound effect, so it follows the SFX
+            # slider instead of becoming inaudible when music is turned down.
+            self.coffin_channel.set_volume(self.settings.sfx_volume * 0.9)
             self.coffin_channel.play(
                 self.coffin_sound, loops=-1 if self.coffin_loops else 0
             )
@@ -439,7 +441,8 @@ class AudioManager:
                 pass
         if self.coffin_channel is not None:
             try:
-                self.coffin_channel.set_volume(self._music_volume() * 0.72)
+                coffin_volume = 0.0 if self.settings.muted else self.settings.sfx_volume * 0.9
+                self.coffin_channel.set_volume(coffin_volume)
             except pygame.error:
                 pass
         if self.settings.muted:
