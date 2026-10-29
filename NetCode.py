@@ -445,11 +445,18 @@ class HostSession(_BaseSession):
                 continue
             if self._client is not None:
                 try:
+                    client.settimeout(SOCKET_POLL)
                     client.sendall(encode_message({
                         "t": "error", "code": "busy",
                         "message": "This host already has a partner.",
                     }))
-                except OSError:
+                    client.shutdown(socket.SHUT_WR)
+                    # Consume the joining client's hello before closing. If
+                    # unread client data remains, some TCP stacks reset the
+                    # connection and discard our useful busy response.
+                    while client.recv(4096):
+                        pass
+                except (OSError, socket.timeout):
                     pass
                 client.close()
                 continue
@@ -465,7 +472,6 @@ class HostSession(_BaseSession):
                                       name="spacegame-host-reader", daemon=True)
             self._threads.append(reader)
             reader.start()
-            return
 
     def _reader_loop(self, client):
         decoder = MessageBuffer()
@@ -611,6 +617,7 @@ class ClientSession(_BaseSession):
         self._input_seq = 0
         self._last_input = 0.0
         self._connect_thread = None
+        self._handshake_deadline = 0.0
 
     # ------------------------------------------------------------------ setup
     def connect(self):
@@ -640,6 +647,7 @@ class ClientSession(_BaseSession):
             return
         self._socket = sock
         self._last_rx = time.monotonic()
+        self._handshake_deadline = self._last_rx + HANDSHAKE_TIMEOUT
         self._start_sender(sock)
         self._queue_message({"t": "hello", "v": PROTOCOL_VERSION,
                              "name": self.name, "ship": self.ship})
@@ -658,6 +666,9 @@ class ClientSession(_BaseSession):
                     chunk = sock.recv(8192)
                 except socket.timeout:
                     if self.state == "connecting":
+                        if time.monotonic() > self._handshake_deadline:
+                            self._fail("host handshake timed out")
+                            return
                         continue
                     if self._idle_expired():
                         self._fail("host timed out")
@@ -701,6 +712,11 @@ class ClientSession(_BaseSession):
                         self._post({"t": "peer_left",
                                     "reason": message["reason"]})
                         self._fail("host left")
+                        return
+                    elif message["t"] == "error":
+                        self._post(message)
+                        self._set_state("error", message["message"])
+                        self.close()
                         return
                     else:
                         self._post(message)
