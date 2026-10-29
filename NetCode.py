@@ -169,6 +169,10 @@ def validate_client_message(message):
         if power not in ("tiger", "chainsaw"):
             raise ProtocolError("unknown superpower")
         return {"t": "superpower", "kind": power}
+    if kind == "pause_request":
+        desired = message.get("paused")
+        return {"t": "pause_request",
+                "paused": desired if isinstance(desired, bool) else None}
     return {"t": "pause_request"}
 
 
@@ -554,7 +558,8 @@ class HostSession(_BaseSession):
                     elif message["t"] == "ping":
                         self._queue_message({"t": "pong", "ts": message["ts"]})
                     elif message["t"] == "pause_request":
-                        self._post({"t": "pause_request"})
+                        self._post({"t": "pause_request",
+                                    "paused": message.get("paused")})
                     elif message["t"] == "story_skip":
                         self._post({"t": "peer_story_skip"})
                     elif message["t"] == "superpower":
@@ -751,8 +756,11 @@ class ClientSession(_BaseSession):
             "fire": bool(fire),
         })
 
-    def send_pause_request(self):
-        return self._queue_message({"t": "pause_request"})
+    def send_pause_request(self, paused=None):
+        message = {"t": "pause_request"}
+        if isinstance(paused, bool):
+            message["paused"] = paused
+        return self._queue_message(message)
 
     def send_story_skip(self):
         return self._queue_message({"t": "story_skip"})

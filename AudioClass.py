@@ -67,6 +67,7 @@ class AudioManager:
         self.coffin_sound = None
         self.coffin_loops = False
         self.coffin_duration = 0.0
+        self.coffin_playing = False
         self.boat_channel = None
         self.paused = False
         self.music_paused = False
@@ -121,7 +122,10 @@ class AudioManager:
                 return
             self.last_played[name] = now
         try:
-            channel = pygame.mixer.find_channel(True)
+            # Leave reserved channels (music, Coffin Dance, Tiger, and boat)
+            # to their owners. Forcing a channel here could replace the
+            # Coffin Dance track with an unrelated short sound effect.
+            channel = pygame.mixer.find_channel()
             if channel is None:
                 return
             channel.set_volume(max(0.0, min(1.0, self.settings.sfx_volume * volume)))
@@ -308,8 +312,11 @@ class AudioManager:
         if not self.enabled or self.settings.muted or self.coffin_channel is None:
             return 0.0
         try:
-            if self.coffin_channel.get_busy():
+            if self.coffin_playing and self.coffin_channel.get_busy():
                 return self.coffin_duration if not self.coffin_loops else 0.0
+            # Clear any stale sound already on the dedicated channel before
+            # starting the full track.
+            self.coffin_channel.stop()
             if self.coffin_sound is None:
                 self.coffin_sound = self.sounds.get("meme_coffin_dance")
                 self.coffin_loops = self.coffin_sound is None
@@ -325,6 +332,7 @@ class AudioManager:
             self.coffin_channel.play(
                 self.coffin_sound, loops=-1 if self.coffin_loops else 0
             )
+            self.coffin_playing = True
             return 0.0 if self.coffin_loops else self.coffin_duration
         except (pygame.error, ValueError, MemoryError):
             return 0.0
@@ -333,6 +341,7 @@ class AudioManager:
         try:
             if self.coffin_channel is not None:
                 self.coffin_channel.stop()
+            self.coffin_playing = False
         except pygame.error:
             pass
 

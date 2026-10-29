@@ -112,6 +112,18 @@ def build_snapshot(game, names):
             "saws": [[round(saw[0], 1), round(saw[1], 1)]
                      for saw in game.chainsaw.saws],
         } if game.chainsaw.active else None),
+        "meme_event": ({
+            "kind": game.meme_event.kind,
+            "time": round(game.meme_event.time, 3),
+            "duration": round(game.meme_event.duration, 3),
+            "arrow_count": int(game.meme_event.arrow_count),
+            "envelopes": [{
+                "x": round(envelope["x"], 1),
+                "y": round(envelope["y"], 1),
+                "speed": round(envelope["speed"], 1),
+                "phase": round(envelope["phase"], 3),
+            } for envelope in game.meme_event.envelopes],
+        } if game.meme_event.active else None),
         "story": story,
         "upgrade": None,
         "result": (game.campaign_result if state == "victory"
@@ -322,8 +334,18 @@ class CoopHostGame(GameProcess):
                 self._peer_disconnected(reason)
                 return
             if kind == "pause_request":
-                # Only the host owns the pause state; the request is a hint
-                # that the client would like a break, never a state change.
+                # Pause is authoritative on the host, then shared with both
+                # players through the next state snapshot.
+                desired = message.get("paused")
+                if desired is True and self.state == "playing":
+                    self._pause()
+                elif desired is False and self.state == "paused":
+                    self._resume()
+                elif desired is None:
+                    if self.state == "playing":
+                        self._pause()
+                    elif self.state == "paused":
+                        self._resume()
                 continue
             if kind == "peer_story_skip":
                 if self.state == "story":

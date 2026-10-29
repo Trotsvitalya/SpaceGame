@@ -18,6 +18,7 @@ from GameData import SHIPS, UPGRADES, WEAPONS
 from ChainsawUltimate import ChainsawUltimate
 from Hazards import BeamAttack, DangerZone
 from Localization import tr
+from MemeEventSystem import MemeEventSystem
 from PowerUpClass import PowerUp
 from ResourcesClass import palette_for
 from SpaceBackdrop import SpaceBackdrop
@@ -26,6 +27,7 @@ from UIClass import draw_bar, draw_panel, draw_text
 from utils import VH, VW, clamp, format_score, format_time
 
 SNAPSHOT_STALE = 8.0
+SNAPSHOT_INTERPOLATION = 0.05
 
 
 def _color(value, fallback=(120, 220, 255)):
@@ -72,6 +74,7 @@ class CoopClientScene:
         self.snapshot = None
         self.previous_snapshot = None
         self.snapshot_time = time.monotonic()
+        self.previous_snapshot_time = self.snapshot_time
         self.state = "waiting"
         self.result = None
         self.disconnect_reason = ""
@@ -85,6 +88,7 @@ class CoopClientScene:
         self._music_stopped = False
         self.tiger_ultimate = TigerUltimate()
         self.chainsaw = ChainsawUltimate()
+        self.meme_event = MemeEventSystem()
         self._remote_chainsaw_sound_timer = 0.0
         self._tiger_paused = False
         self._tiger_resume_pending = False
@@ -152,6 +156,14 @@ class CoopClientScene:
             if self._remote_chainsaw_sound_timer <= 0:
                 self.audio.play("chainsaw", 0.55)
                 self._remote_chainsaw_sound_timer = 1.1
+        if self.meme_event.active and self.state != "paused":
+            self.meme_event.time += dt
+            if self.meme_event.kind == "red_envelopes":
+                for envelope in self.meme_event.envelopes:
+                    envelope["y"] += envelope["speed"] * dt
+                    envelope["x"] += math.sin(
+                        self.meme_event.time * 2.8 + envelope["phase"]
+                    ) * 34 * dt
         if (self._tiger_resume_pending
                 and not self.audio.tiger_ultimate_busy()):
             self.audio.resume_music()
@@ -193,6 +205,7 @@ class CoopClientScene:
 
     def _apply_snapshot(self, snapshot):
         self.previous_snapshot = self.snapshot
+        self.previous_snapshot_time = self.snapshot_time
         self.snapshot = snapshot
         self.snapshot_time = time.monotonic()
         zone = snapshot.get("zone")
@@ -205,6 +218,7 @@ class CoopClientScene:
             self._set_state(state)
         self._sync_tiger(snapshot.get("tiger"), snapshot.get("mode"))
         self._sync_chainsaw(snapshot.get("chainsaw"))
+        self._sync_meme_event(snapshot.get("meme_event"))
         if snapshot.get("result") and not self.result:
             self.result = snapshot["result"]
         story = snapshot.get("story")
@@ -213,6 +227,67 @@ class CoopClientScene:
             if key != self.story_key:
                 self.story_key = key
                 self.audio.play("ui_click", 0.35, throttle_ms=180)
+
+    def _sync_meme_event(self, state):
+        valid_events = set(MemeEventSystem.EVENTS) | {"coffin_dance"}
+        previous_kind = self.meme_event.kind
+        kind = state.get("kind") if isinstance(state, dict) else None
+        if kind not in valid_events:
+            self._stop_synced_meme_audio(previous_kind)
+            self.meme_event.kind = None
+            self.meme_event.time = self.meme_event.duration = 0.0
+            self.meme_event.envelopes.clear()
+            return
+        if kind != previous_kind:
+            self._stop_synced_meme_audio(previous_kind)
+            if kind == "coffin_dance":
+                self.audio.play_coffin_dance()
+            elif kind == "straw_boat":
+                self.audio.play_meme_shout()
+                self.audio.play_boat_loop()
+                self.audio.play("meme_drum", 0.65)
+                self.audio.play("meme_water", 0.55)
+            elif kind == "vacuum_hurricane":
+                self.audio.play("meme_air_raid", 0.65)
+            elif kind == "golden_dragon":
+                self.audio.play("meme_dragon", 0.85)
+            elif kind == "red_envelopes":
+                self.audio.play("meme_envelopes", 0.85)
+        self.meme_event.kind = kind
+        try:
+            self.meme_event.time = clamp(float(state.get("time", 0)), 0.0,
+                                         180.0)
+            duration = float(state.get("duration", 0))
+            self.meme_event.duration = (duration if math.isfinite(duration)
+                                        and duration > 0 else
+                                        MemeEventSystem.DURATIONS[self.meme_event.kind])
+            self.meme_event.arrow_count = max(0, min(
+                MemeEventSystem.BOAT_MAX_ARROWS,
+                int(state.get("arrow_count", 22))))
+        except (TypeError, ValueError, OverflowError):
+            self.meme_event.time = 0.0
+            self.meme_event.duration = MemeEventSystem.DURATIONS[self.meme_event.kind]
+            self.meme_event.arrow_count = 22
+        envelopes = []
+        for envelope in state.get("envelopes") or []:
+            if not isinstance(envelope, dict):
+                continue
+            try:
+                envelopes.append({
+                    "x": clamp(float(envelope.get("x", 0)), -100.0, VW + 100.0),
+                    "y": clamp(float(envelope.get("y", 0)), -VH, VH + 100.0),
+                    "speed": clamp(float(envelope.get("speed", 0)), 0.0, 300.0),
+                    "phase": float(envelope.get("phase", 0)),
+                })
+            except (TypeError, ValueError):
+                continue
+        self.meme_event.envelopes = envelopes
+
+    def _stop_synced_meme_audio(self, kind):
+        if kind == "straw_boat":
+            self.audio.stop_boat_loop()
+        elif kind == "coffin_dance":
+            self.audio.stop_coffin_dance()
 
     def _sync_chainsaw(self, state):
         valid_phases = {"split", "chase", "finish"}
@@ -223,11 +298,17 @@ class CoopClientScene:
                 self.audio.resume_music()
             return
 
+        previous_phase = self.chainsaw.phase
         if not self.chainsaw.active:
             self.audio.pause_music()
             self.audio.play("chainsaw", 0.85)
             self._remote_chainsaw_sound_timer = 1.1
         self.chainsaw.phase = state["phase"]
+        if (previous_phase == "split" and self.chainsaw.phase == "chase"
+                and self.state != "paused"):
+            self.audio.resume_music()
+            self.audio.play("chainsaw", 0.85)
+            self._remote_chainsaw_sound_timer = 1.1
         try:
             self.chainsaw.phase_time = clamp(float(state.get("phase_time", 0)),
                                               0.0, 2.0)
@@ -310,6 +391,14 @@ class CoopClientScene:
         elif previous in ("victory", "gameover") and state in ("playing", "story"):
             self._music_stopped = False
             self.audio.play_music("game", self.mode)
+        if state == "paused" and previous != "paused":
+            self.audio.pause_music()
+            if self.tiger_ultimate.active:
+                self.audio.pause_tiger_ultimate()
+        elif previous == "paused" and state != "paused":
+            self.audio.resume_music()
+            if self.tiger_ultimate.active:
+                self.audio.resume_tiger_ultimate()
 
     def _disconnect(self, reason):
         if self.state == "disconnected":
@@ -370,7 +459,7 @@ class CoopClientScene:
             if event.key == pygame.K_p:
                 self.pause_hint = 2.6
                 if self.net is not None:
-                    self.net.send_pause_request()
+                    self.net.send_pause_request(paused=self.state != "paused")
                 self.audio.play("ui_click", 0.5)
                 return
 
@@ -415,11 +504,62 @@ class CoopClientScene:
         else:
             self.app.go_multiplayer()
 
+    def _interpolated_snapshot(self):
+        current = self.snapshot
+        previous = self.previous_snapshot
+        if not isinstance(current, dict) or not isinstance(previous, dict):
+            return current
+        elapsed = max(0.0, time.monotonic() - self.snapshot_time)
+        sample_span = max(0.016, min(
+            0.15, self.snapshot_time - self.previous_snapshot_time
+        ))
+        alpha = clamp(elapsed / max(sample_span, SNAPSHOT_INTERPOLATION), 0.0, 1.0)
+        if alpha >= 1.0:
+            return current
+        display = dict(current)
+        for list_key, match_key in (("players", "slot"), ("enemies", None)):
+            now_items = current.get(list_key) or []
+            old_items = previous.get(list_key) or []
+            if len(now_items) != len(old_items):
+                continue
+            blended = []
+            for index, item in enumerate(now_items):
+                old = old_items[index]
+                if (not isinstance(item, dict) or not isinstance(old, dict)
+                        or (match_key and item.get(match_key) != old.get(match_key))
+                        or (not match_key and item.get("kind") != old.get("kind"))):
+                    blended.append(item)
+                    continue
+                blended_item = dict(item)
+                for coord in ("x", "y"):
+                    try:
+                        blended_item[coord] = float(old.get(coord, item[coord])) + (
+                            float(item[coord]) - float(old.get(coord, item[coord]))
+                        ) * alpha
+                    except (KeyError, TypeError, ValueError):
+                        pass
+                blended.append(blended_item)
+            display[list_key] = blended
+        old_boss = previous.get("boss")
+        new_boss = current.get("boss")
+        if (isinstance(old_boss, dict) and isinstance(new_boss, dict)
+                and old_boss.get("kind") == new_boss.get("kind")):
+            boss = dict(new_boss)
+            for coord in ("x", "y"):
+                try:
+                    boss[coord] = float(old_boss.get(coord, new_boss[coord])) + (
+                        float(new_boss[coord]) - float(old_boss.get(coord, new_boss[coord]))
+                    ) * alpha
+                except (KeyError, TypeError, ValueError):
+                    pass
+            display["boss"] = boss
+        return display
+
     # ----------------------------------------------------------------- draw
     def draw(self, canvas):
         self._overlay_buttons = []
         self.backdrop.draw(canvas)
-        snapshot = self.snapshot
+        snapshot = self._interpolated_snapshot()
         if snapshot is not None:
             self._draw_world(canvas, snapshot)
         canvas.blit(self.resources.vignette, (0, 0))
@@ -500,6 +640,7 @@ class CoopClientScene:
 
         for player in snapshot.get("players") or []:
             self._draw_player(canvas, player)
+        self.meme_event.draw(canvas, self.resources)
 
     def _draw_player(self, canvas, player):
         x = int(player.get("x", 0))
