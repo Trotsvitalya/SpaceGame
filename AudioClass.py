@@ -25,6 +25,9 @@ ASSET_SOUNDS = {
     "meme_chinese_shout_1": "meme_chinese_shout_1.wav",
     "meme_chinese_shout_2": "meme_chinese_shout_2.wav",
     "meme_chinese_shout_3": "meme_chinese_shout_3.wav",
+    "meme_envelopes": "envelopes.mp3",
+    "meme_dragon": "dragon.mp3",
+    "meme_boat": "boat.mp3",
 }
 
 
@@ -61,6 +64,7 @@ class AudioManager:
         self.meme_loop_sound = None
         self.coffin_channel = None
         self.coffin_sound = None
+        self.boat_channel = None
         self.paused = False
         self.music_paused = False
         self.last_played = {}
@@ -70,9 +74,13 @@ class AudioManager:
             if pygame.mixer.get_init():
                 self.enabled = True
                 pygame.mixer.set_num_channels(24)
-                pygame.mixer.set_reserved(2)
+                # Keep dedicated channels for music, Coffin Dance, Tiger, and
+                # the boat loop so pooled effects can never cut them off.
+                pygame.mixer.set_reserved(4)
                 self.meme_loop_channel = pygame.mixer.Channel(0)
                 self.coffin_channel = pygame.mixer.Channel(1)
+                self.tiger_channel = pygame.mixer.Channel(2)
+                self.boat_channel = pygame.mixer.Channel(3)
                 # pygame-ce 2.5.x has no pygame.MUSIC_END constant, so use a
                 # project event and register it with the music player.
                 pygame.mixer.music.set_endevent(MUSIC_END_EVENT)
@@ -130,12 +138,6 @@ class AudioManager:
         """Play the supplied Tiger audio exactly once per activation, if valid."""
         if not self.enabled or self.settings.muted:
             return False
-        if self.tiger_channel is not None:
-            try:
-                if self.tiger_channel.get_busy():
-                    return False
-            except pygame.error:
-                pass
         if self.tiger_sound is None:
             path = os.path.join(SOUND_DIR, "tiger_hu_hu_sheng_wei.mp3")
             if not os.path.isfile(path):
@@ -145,14 +147,39 @@ class AudioManager:
             except (pygame.error, OSError):
                 return False
         try:
-            self.tiger_channel = pygame.mixer.find_channel(True)
             if self.tiger_channel is None:
                 return False
+            # A previous tail may still be playing when a new video begins.
+            # Restart it on its reserved channel instead of dropping this cue.
+            self.tiger_channel.stop()
             self.tiger_channel.set_volume(self.settings.sfx_volume)
             self.tiger_channel.play(self.tiger_sound)
             return True
         except pygame.error:
             return False
+
+    def play_boat_loop(self):
+        """Loop the boat ambience only while the Straw Boat event is visible."""
+        if (not self.enabled or self.settings.muted or self.boat_channel is None):
+            return False
+        sound = self.sounds.get("meme_boat")
+        if sound is None:
+            return False
+        try:
+            if self.boat_channel.get_busy():
+                return True
+            self.boat_channel.set_volume(self.settings.sfx_volume * 0.55)
+            self.boat_channel.play(sound, loops=-1)
+            return True
+        except pygame.error:
+            return False
+
+    def stop_boat_loop(self):
+        try:
+            if self.boat_channel is not None:
+                self.boat_channel.stop()
+        except pygame.error:
+            pass
 
     def pause_tiger_ultimate(self):
         try:
@@ -201,6 +228,7 @@ class AudioManager:
     def stop_music(self):
         self._stop_all_music()
         self.stop_coffin_dance()
+        self.stop_boat_loop()
         self.current_key = None
         self.playlist = []
         self.paused = False
@@ -352,6 +380,12 @@ class AudioManager:
                     self.coffin_channel.pause()
             except pygame.error:
                 pass
+        if self.boat_channel is not None:
+            try:
+                if self.boat_channel.get_busy():
+                    self.boat_channel.pause()
+            except pygame.error:
+                pass
 
     def resume_music(self):
         if not self.enabled:
@@ -360,6 +394,11 @@ class AudioManager:
         if self.coffin_channel is not None:
             try:
                 self.coffin_channel.unpause()
+            except pygame.error:
+                pass
+        if self.boat_channel is not None:
+            try:
+                self.boat_channel.unpause()
             except pygame.error:
                 pass
         if not self.music_paused:

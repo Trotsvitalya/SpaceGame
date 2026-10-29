@@ -923,21 +923,29 @@ class GameProcess:
                 self.audio.play_coffin_dance()
             elif self.meme_event.kind == "straw_boat":
                 self.audio.play_meme_shout()
+                self.audio.play_boat_loop()
                 self.audio.play("meme_drum", 0.65)
                 self.audio.play("meme_water", 0.55)
+            elif self.meme_event.kind == "golden_dragon":
+                self.audio.play("meme_dragon", 0.85)
+            elif self.meme_event.kind == "red_envelopes":
+                self.audio.play("meme_envelopes", 0.85)
             else:
                 self.audio.play({
                     "vacuum_hurricane": "meme_air_raid",
-                    "golden_dragon": "meme_boing",
-                    "red_envelopes": "meme_pickup",
                 }.get(self.meme_event.kind, "meme_boing"), 0.65)
         elif (event == "end"
-              and self.meme_event.last_ended == "coffin_dance"):
-            self.audio.stop_coffin_dance()
+              and self.meme_event.last_ended is not None):
+            if self.meme_event.last_ended == "coffin_dance":
+                self.audio.stop_coffin_dance()
+            elif self.meme_event.last_ended == "straw_boat":
+                self.audio.stop_boat_loop()
 
     def _start_coffin_dance(self):
         if self.mode != "meme":
             return False
+        if self.meme_event.kind == "straw_boat":
+            self.audio.stop_boat_loop()
         started = self.meme_event.start("coffin_dance")
         if started:
             self.audio.play_meme_shout()

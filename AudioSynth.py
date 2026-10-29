@@ -196,7 +196,7 @@ def _air_raid_siren():
     if fmt is None:
         return None
     sample_rate = fmt[0]
-    duration = 1.25
+    duration = 1.8
     count = int(sample_rate * duration)
     samples = []
     phase = 0.0
