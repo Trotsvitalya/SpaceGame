@@ -25,6 +25,7 @@ class MemeEventSystem:
     def __init__(self):
         self.kind = None
         self.time = 0.0
+        self.duration = 0.0
         self.cooldown = 10.0
         self.next_event = 0
         self.arrow_count = 22
@@ -41,6 +42,7 @@ class MemeEventSystem:
             return False
         self.kind = kind
         self.time = 0.0
+        self.duration = self.DURATIONS[kind]
         self.arrow_count = 22
         self.dragon_hits.clear()
         self.envelopes.clear()
@@ -53,6 +55,17 @@ class MemeEventSystem:
                     "phase": random.uniform(0, math.tau),
                 })
         return True
+
+    def set_duration(self, duration):
+        """Extend the active visual event to match a longer media track."""
+        if self.kind is None:
+            return
+        try:
+            duration = float(duration)
+        except (TypeError, ValueError):
+            return
+        if math.isfinite(duration) and duration > 0:
+            self.duration = max(self.DURATIONS[self.kind], duration)
 
     def update(self, dt):
         if self.kind is None:
@@ -69,7 +82,7 @@ class MemeEventSystem:
             for envelope in self.envelopes:
                 envelope["y"] += envelope["speed"] * dt
                 envelope["x"] += math.sin(self.time * 2.8 + envelope["phase"]) * 34 * dt
-        if self.time >= self.DURATIONS[self.kind]:
+        if self.time >= self.duration:
             self.last_ended = self.kind
             self.kind = None
             self.envelopes.clear()
@@ -263,7 +276,8 @@ class MemeEventSystem:
 
     def _draw_coffin_dance(self, surface, resources):
         layer = pygame.Surface((VW, VH), pygame.SRCALPHA)
-        progress = clamp(self.time / self.DURATIONS["coffin_dance"], 0.0, 1.0)
+        animation_duration = self.DURATIONS["coffin_dance"]
+        progress = (self.time % animation_duration) / animation_duration
         x = -170 + (VW + 340) * progress
         bob = math.sin(self.time * 12.0) * 9
         y = int(VH * .50 + bob)

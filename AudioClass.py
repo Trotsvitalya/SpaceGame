@@ -65,6 +65,8 @@ class AudioManager:
         self.meme_loop_sound = None
         self.coffin_channel = None
         self.coffin_sound = None
+        self.coffin_loops = False
+        self.coffin_duration = 0.0
         self.boat_channel = None
         self.paused = False
         self.music_paused = False
@@ -169,7 +171,7 @@ class AudioManager:
         try:
             if self.boat_channel.get_busy():
                 return True
-            self.boat_channel.set_volume(self.settings.sfx_volume * 0.55)
+            self.boat_channel.set_volume(self.settings.sfx_volume * 0.85)
             self.boat_channel.play(sound, loops=-1)
             return True
         except pygame.error:
@@ -302,23 +304,28 @@ class AudioManager:
             return False
 
     def play_coffin_dance(self):
-        """Loop the supplied Coffin Dance track while its event is active."""
+        """Play the supplied Coffin Dance track once; return its duration."""
         if not self.enabled or self.settings.muted or self.coffin_channel is None:
-            return False
+            return 0.0
         try:
             if self.coffin_channel.get_busy():
-                return True
+                return self.coffin_duration if not self.coffin_loops else 0.0
             if self.coffin_sound is None:
                 self.coffin_sound = self.sounds.get("meme_coffin_dance")
-            if self.coffin_sound is None:
+                self.coffin_loops = self.coffin_sound is None
+            if self.coffin_loops:
                 self.coffin_sound = make_coffin_dance_loop()
             if self.coffin_sound is None:
-                return False
+                return 0.0
+            if not self.coffin_loops:
+                self.coffin_duration = self.coffin_sound.get_length()
             self.coffin_channel.set_volume(self._music_volume() * 0.72)
-            self.coffin_channel.play(self.coffin_sound, loops=-1)
-            return True
+            self.coffin_channel.play(
+                self.coffin_sound, loops=-1 if self.coffin_loops else 0
+            )
+            return 0.0 if self.coffin_loops else self.coffin_duration
         except (pygame.error, ValueError, MemoryError):
-            return False
+            return 0.0
 
     def stop_coffin_dance(self):
         try:
@@ -444,6 +451,9 @@ class AudioManager:
         else:
             for index in range(2, pygame.mixer.get_num_channels()):
                 try:
-                    pygame.mixer.Channel(index).set_volume(self.settings.sfx_volume)
+                    volume = self.settings.sfx_volume
+                    if index == 3:
+                        volume *= 0.85
+                    pygame.mixer.Channel(index).set_volume(volume)
                 except pygame.error:
                     break

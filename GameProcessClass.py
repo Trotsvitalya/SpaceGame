@@ -920,7 +920,7 @@ class GameProcess:
         event = self.meme_event.update(dt)
         if event == "start":
             if self.meme_event.kind == "coffin_dance":
-                self.audio.play_coffin_dance()
+                self._play_coffin_dance_media()
             elif self.meme_event.kind == "straw_boat":
                 self.audio.play_meme_shout()
                 self.audio.play_boat_loop()
@@ -949,8 +949,13 @@ class GameProcess:
         started = self.meme_event.start("coffin_dance")
         if started:
             self.audio.play_meme_shout()
-            self.audio.play_coffin_dance()
+            self._play_coffin_dance_media()
         return started
+
+    def _play_coffin_dance_media(self):
+        duration = self.audio.play_coffin_dance()
+        if duration:
+            self.meme_event.set_duration(duration)
 
     def _has_tiger_powerup(self):
         return any(p.alive and p.kind == "tiger" for p in self.powerups)

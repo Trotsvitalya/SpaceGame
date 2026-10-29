@@ -646,7 +646,7 @@ class GameFlowTests(GameTestCase):
         game._kill_enemy(enemy, award=False, drop=False)
         self.assertEqual(game.meme_event.kind, "coffin_dance")
         game.draw(self.app.canvas)
-        game._update_meme_event(game.meme_event.DURATIONS["coffin_dance"] + .01)
+        game._update_meme_event(game.meme_event.duration + .01)
         self.assertIsNone(game.meme_event.kind)
         self.assertEqual(game.meme_event.last_ended, "coffin_dance")
 
